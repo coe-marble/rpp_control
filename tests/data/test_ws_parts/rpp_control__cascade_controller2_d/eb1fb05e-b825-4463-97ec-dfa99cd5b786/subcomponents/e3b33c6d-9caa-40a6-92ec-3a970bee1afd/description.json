@@ -1,0 +1,14 @@
+{
+    "Id": "e3b33c6d-9caa-40a6-92ec-3a970bee1afd",
+    "Name": "PIDPoseController2D_comp",
+    "LinkedComponentId": "e5fc835c-0899-48eb-8628-742f3d478818",
+    "LinkedComponentWorkspace": "rpp_control",
+    "ParentComponentInfo": {
+        "Id": "eb1fb05e-b825-4463-97ec-dfa99cd5b786",
+        "PluginType": "rpp_control::MotionController2D",
+        "PluginName": "rpp_control::CascadeController2D",
+        "SlotName": "pose_controller",
+        "Library": "rpp_control",
+        "IsLinked": false
+    }
+}

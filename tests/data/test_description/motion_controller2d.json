@@ -1,0 +1,18 @@
+{
+    "ScriptPath": "/home/luka/fer/rpp/rpp_control/include/rpp_control/motion_controller2d.hpp",
+    "Language": "cpp",
+    "Components": {
+        "controller": [
+            {
+                "Id": "eb1fb05e-b825-4463-97ec-dfa99cd5b786",
+                "PluginName": "rpp_control::CascadeController2D"
+            }
+        ],
+        "allocator": [
+            {
+                "Id": "73e4083e-ea95-4922-96c8-39a4aaa41135",
+                "PluginName": "rpp_control::WaterjetAllocator"
+            }
+        ]
+    }
+}

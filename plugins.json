@@ -1,0 +1,32 @@
+{
+    "Library": "rpp_control",
+    "Plugins": [
+        {
+            "Type": "file",
+            "Path": "plugins/controllers/pid_pose_controller.hpp",
+            "Name": "PIDPoseController"
+        },
+        {
+            "Type": "file",
+            "Path": "plugins/controllers/pid_twist_controller.hpp",
+            "Name": "PIDTwistController"
+        },
+        {
+            "Name": "CascadeController2D",
+            "Path": "plugins/controllers/cascade_controller.hpp",
+            "Type": "file"
+        },
+        {
+            "Name": "rpp_control::WaterjetAllocator",
+            "Path": "plugins/allocators/waterjet_allocator.hpp",
+            "Type": "file"
+        }
+    ],
+    "PluginTypes": [
+        {
+            "Path": "plugin_types/controllers.capnp",
+            "Type": "file"
+        }
+
+    ]
+}

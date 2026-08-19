@@ -1,0 +1,10 @@
+{
+    "Id": "c67287af-7a07-4c08-9f6e-4f0563d895a6",
+    "Name": "PIDTwistController2D_comp",
+    "PluginType": "rpp_control::TwistController2D",
+    "PluginName": "rpp_control::PIDTwistController2D",
+    "Library": "rpp_control",
+    "SubcomponentSpec": {},
+    "Subcomponents": {},
+    "ParentComponentInfo": null
+}

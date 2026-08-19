@@ -1,0 +1,14 @@
+{
+    "Id": "8ba8c2a4-8332-495a-bf7e-a507cbc0ee32",
+    "Name": "PIDTwistController2D_comp",
+    "LinkedComponentId": "c67287af-7a07-4c08-9f6e-4f0563d895a6",
+    "LinkedComponentWorkspace": "rpp_control",
+    "ParentComponentInfo": {
+        "Id": "eb1fb05e-b825-4463-97ec-dfa99cd5b786",
+        "PluginType": "rpp_control::MotionController2D",
+        "PluginName": "rpp_control::CascadeController2D",
+        "SlotName": "twist_controller",
+        "Library": "rpp_control",
+        "IsLinked": false
+    }
+}
