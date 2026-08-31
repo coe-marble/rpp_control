@@ -4,7 +4,7 @@
 
 #include <rpp_plugin_types/rpp_control/MotionController3D.hpp>
 #include <rpp_plugin_types/rpp_control/MotionControllerAllocator3D.hpp>
-#include <rpp_schema/rpp_common/EnablerOdometry3D.hpp>
+#include <rpp_schema/rpp_control/EnablerOdometry3D.hpp>
 
 namespace rpp_control {
 
@@ -15,8 +15,8 @@ namespace rpp_control {
         using InputMessage = ControllerComponent::Odometry3D;
         using OutputMessage = ControllerComponent::Wrench3D;
         using Command = rpp_schema::rpp_common::Command;
-        using Enabler = rpp_schema::rpp_common::Enabler3D;
-        using EnablerOdometry = rpp_schema::rpp_common::EnablerOdometry3D;
+        using Enabler = rpp_schema::rpp_control::Enabler3D;
+        using EnablerOdometry = rpp_schema::rpp_control::EnablerOdometry3D;
         using ControllerIO = ControllerIOT<6>;
         using Is3D = std::true_type;
         static constexpr DOF default_active_dofs =
@@ -94,7 +94,7 @@ namespace rpp_control {
 
     };
 
-    class MotionController3D final : public MotionControllerT<MotionController3DTraits>
+    class MotionController3DImpl final : public MotionControllerT<MotionController3DTraits>
     {
         public:
             RPP_COMPONENTS(
@@ -102,7 +102,7 @@ namespace rpp_control {
                 {"allocator", "rpp_control::MotionControllerAllocator3D"}
             )
 
-            explicit MotionController3D(const rpp::ComponentContext& context)
+            explicit MotionController3DImpl(const rpp::ComponentContext& context)
                 : MotionControllerT<MotionController3DTraits>(context)
             {
             }

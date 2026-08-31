@@ -5,18 +5,23 @@
         "controller": "rpp_testing::MotionController2D",
         "allocator": "rpp_control::MotionControllerAllocator2D"
     },
-    "Components": {
-        "controller": [
-            {
-                "Id": "eb1fb05e-b825-4463-97ec-dfa99cd5b786",
-                "PluginName": "rpp_control::CascadeController2D"
+    "Configurations": {
+        "Default": {
+            "Components": {
+                "controller": [
+                    {
+                        "Id": "eb1fb05e-b825-4463-97ec-dfa99cd5b786",
+                        "PluginName": "rpp_control::CascadeController2D"
+                    }
+                ],
+                "allocator": [
+                    {
+                        "Id": "73e4083e-ea95-4922-96c8-39a4aaa41135",
+                        "PluginName": "rpp_control::WaterjetAllocator"
+                    }
+                ]
             }
-        ],
-        "allocator": [
-            {
-                "Id": "73e4083e-ea95-4922-96c8-39a4aaa41135",
-                "PluginName": "rpp_control::WaterjetAllocator"
-            }
-        ]
-    }
+        }
+    },
+    "ActiveConfiguration": "Default"
 }

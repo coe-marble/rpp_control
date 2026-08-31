@@ -1,6 +1,6 @@
 #include "gtest/gtest.h"
-#include "rpp_control/motion_controller2d.hpp"
-#include "rpp_control/motion_controller3d.hpp"
+#include "rpp_control/motion_controller2d_impl.hpp"
+#include "rpp_control/motion_controller3d_impl.hpp"
 #include "rpp_cpp/context_builder.hpp"
 
 
@@ -38,7 +38,7 @@ TEST_F(TestMotionController, TestInstance2DAndSetReferences) {
 
     clock->set_time(100.0);
 
-    auto controller_2d = std::make_unique<rpp_control::MotionController2D>(context);
+    auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(context);
 
     EXPECT_TRUE(controller_2d != nullptr);
 
@@ -46,7 +46,7 @@ TEST_F(TestMotionController, TestInstance2DAndSetReferences) {
     controller_2d->get_active_dofs(dofs);
     EXPECT_EQ(dofs, rpp_control::DOF_X | rpp_control::DOF_Y | rpp_control::DOF_N);
 
-    auto state = rpp_control::MotionController2D::ControllerIO::State{};
+    auto state = rpp_control::MotionController2DImpl::ControllerIO::State{};
 
     EXPECT_FALSE(state.has_any_pose_ext);
     EXPECT_FALSE(state.has_any_twist_ext);
@@ -116,7 +116,7 @@ TEST_F(TestMotionController, TestInstance2DAndStep) {
     auto clock = std::dynamic_pointer_cast<rpp::RppClockMock>(context.get_clock());
     clock->set_time(100.0);
 
-    auto controller_2d = std::make_unique<rpp_control::MotionController2D>(context);
+    auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(context);
 
     EXPECT_TRUE(controller_2d != nullptr);
 
@@ -148,7 +148,7 @@ TEST_F(TestMotionController, TestInstance2DAndStep) {
 
     EXPECT_TRUE(controller_2d->step(0.01)); // Should succeed now.
 
-    auto state = rpp_control::MotionController2D::ControllerIO::State{};
+    auto state = rpp_control::MotionController2DImpl::ControllerIO::State{};
     controller_2d->get_live_state(state);
 
     EXPECT_TRUE(state.has_feedback);

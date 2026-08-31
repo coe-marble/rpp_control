@@ -8,8 +8,8 @@
 #include <utility>
 
 #include <rpp_cpp/plugin.hpp>
-#include <rpp_plugin_types/rpp_common/MotionController2D.hpp>
-#include <rpp_plugin_types/rpp_common/MotionControllerAllocator2D.hpp>
+#include <rpp_plugin_types/rpp_control/MotionController2D.hpp>
+#include <rpp_plugin_types/rpp_control/MotionControllerAllocator2D.hpp>
 
 #include <rpp_schema/rpp_common/Command.hpp>
 #include <rpp_schema/rpp_common/Odometry2D.hpp>

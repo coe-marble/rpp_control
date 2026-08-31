@@ -27,11 +27,11 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
 
     if (type == "2D")
     {
-        controller_.emplace<MotionController2D>(context);
+        controller_.emplace<MotionController2DImpl>(context);
     }
     else if (type == "3D")
     {
-        controller_.emplace<MotionController3D>(context);
+        controller_.emplace<MotionController3DImpl>(context);
     }
     else
     {

@@ -6,8 +6,8 @@
 
 #include "ros_defs.hpp"
 #include "../utils.hpp"
-#include "../motion_controller2d.hpp"
-#include "../motion_controller3d.hpp"
+#include "../motion_controller2d_impl.hpp"
+#include "../motion_controller3d_impl.hpp"
 
 
 namespace rpp_control {
@@ -20,7 +20,7 @@ namespace rpp_control {
         ~MotionControllerRos() = default;
 
         std::variant<std::monostate,
-            MotionController2D, MotionController3D> controller_;
+            MotionController2DImpl, MotionController3DImpl> controller_;
 
         rclcpp::Subscription<WrenchReference>::SharedPtr wrench_ext_sub_;
         rclcpp::Subscription<TwistReference>::SharedPtr twist_ext_sub_;
@@ -84,13 +84,13 @@ namespace rpp_control {
         template <typename T>
         static constexpr bool is_3d_controller()
         {
-            return std::is_same_v<std::decay_t<T>, MotionController3D>;
+            return std::is_same_v<std::decay_t<T>, MotionController3DImpl>;
         }
 
         template <typename T>
         static constexpr bool is_2d_controller()
         {
-            return std::is_same_v<std::decay_t<T>, MotionController2D>;
+            return std::is_same_v<std::decay_t<T>, MotionController2DImpl>;
         }
 
         template <typename DataType, typename MaskType, typename Callback>

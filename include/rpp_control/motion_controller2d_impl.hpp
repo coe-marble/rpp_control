@@ -2,7 +2,7 @@
 
 #include "motion_controller.hpp"
 #include <rpp_plugin_types/rpp_control/MotionController2D.hpp>
-#include <rpp_schema/rpp_common/EnablerOdometry2D.hpp>
+#include <rpp_schema/rpp_control/EnablerOdometry2D.hpp>
 
 namespace rpp_control {
 
@@ -13,8 +13,8 @@ namespace rpp_control {
         using InputMessage = ControllerComponent::Odometry2D;
         using OutputMessage = ControllerComponent::Wrench2D;
         using Command = rpp_schema::rpp_common::Command;
-        using Enabler = rpp_schema::rpp_common::Enabler2D;
-        using EnablerOdometry = rpp_schema::rpp_common::EnablerOdometry2D;
+        using Enabler = rpp_schema::rpp_control::Enabler2D;
+        using EnablerOdometry = rpp_schema::rpp_control::EnablerOdometry2D;
         using ControllerIO = ControllerIOT<3>;
         using Is3D = std::false_type;
         static constexpr DOF default_active_dofs = DOF_X | DOF_Y | DOF_N;
@@ -74,7 +74,7 @@ namespace rpp_control {
     };
 
 
-    class MotionController2D final : public MotionControllerT<MotionController2DTraits>
+    class MotionController2DImpl final : public MotionControllerT<MotionController2DTraits>
     {
         public:
             RPP_COMPONENTS(
@@ -82,7 +82,7 @@ namespace rpp_control {
                 {"allocator", "rpp_control::MotionControllerAllocator2D"}
             )
 
-            explicit MotionController2D(const rpp::ComponentContext& context)
+            explicit MotionController2DImpl(const rpp::ComponentContext& context)
                 : MotionControllerT<MotionController2DTraits>(context)
             {
             }
