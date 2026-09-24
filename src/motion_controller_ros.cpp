@@ -23,7 +23,7 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
     }
 
     auto context = rpp::ComponentContextBuilder()
-        .build_from_component_path(component_path);
+        .build_component_from_path(component_path);
 
     if (type == "2D")
     {
