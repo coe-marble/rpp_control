@@ -27,21 +27,19 @@ add_library(rpp_control SHARED
   src/motion_controller_ros.cpp
 )
 target_link_libraries(rpp_control
+  PUBLIC
   rclcpp::rclcpp
+  rpp_cpp::rpp_cpp
+  ${geometry_msgs_TARGETS}
+  ${std_msgs_TARGETS}
+  ${nav_msgs_TARGETS}
+  ${marble_control_msgs_TARGETS}
 )
 set(HOME_DIR "$ENV{HOME}")
 target_include_directories(rpp_control PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${HOME_DIR}/.rpp/interfaces/cpp>
     $<INSTALL_INTERFACE:include>
-)
-ament_target_dependencies(rpp_control
-  rclcpp
-  rpp_cpp
-  geometry_msgs
-  std_msgs
-  nav_msgs
-  marble_control_msgs
 )
 
 add_executable(motion_controller_node
