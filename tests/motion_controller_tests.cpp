@@ -30,8 +30,9 @@ bool TestMotionController::initialization_successful = false;
 TEST_F(TestMotionController, TestInstance2DAndSetReferences) {
 
     auto context = rpp::ComponentContextBuilder(rpp::RPP_CLOCK_MOCK)
-        .build_from_script_description(
+        .build_script_from_description_path(
             test_data_dir + "/test_description/motion_controller2d.json",
+            std::nullopt,
             test_data_dir + "/test_ws_parts");
 
     auto clock = std::dynamic_pointer_cast<rpp::RppClockMock>(context.get_clock());
@@ -109,8 +110,9 @@ TEST_F(TestMotionController, TestInstance2DAndSetReferences) {
 
 TEST_F(TestMotionController, TestInstance2DAndStep) {
     auto context = rpp::ComponentContextBuilder(rpp::RPP_CLOCK_MOCK)
-        .build_from_script_description(
+        .build_script_from_description_path(
             test_data_dir + "/test_description/motion_controller2d.json",
+            std::nullopt,
             test_data_dir + "/test_ws_parts");
 
     auto clock = std::dynamic_pointer_cast<rpp::RppClockMock>(context.get_clock());
