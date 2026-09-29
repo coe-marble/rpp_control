@@ -1,5 +1,5 @@
 {
-    "ScriptPath": "/home/luka/fer/rpp/rpp_control/include/rpp_control/motion_controller2d.hpp",
+    "ScriptPath": "include/rpp_control/motion_controller2d.hpp",
     "Language": "cpp",
     "Configurations": {
         "Default": {

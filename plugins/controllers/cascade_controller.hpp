@@ -35,8 +35,23 @@ public:
     Wrench2D::Const step(Odometry2D::Const ref_state, Odometry2D::Const state,
         EnablerOdometry2D::Const enabler, double dt) override
     {
-        auto ref_twist_pose = pose_controller_->step(ref_state.pose(), state.pose(), enabler.pose(), dt);
-        auto ref_tau = twist_controller_->step(std::move(ref_twist_pose), state.twist(), enabler.twist(), dt);
+        const auto pose_twist = pose_controller_->step(
+            ref_state.pose(), state.pose(), enabler.pose(), dt);
+
+        // A disabled pose loop means the velocity reference originates from
+        // the externally supplied twist reference rather than from position
+        // control. The generic controller zeros this value for disabled axes.
+        rpp_schema::rpp_common::Twist2D selected_twist;
+        auto selected_linear = selected_twist.linear();
+        selected_linear.x() = enabler.pose().enableX()
+            ? pose_twist.linear().x() : ref_state.twist().linear().x();
+        selected_linear.y() = enabler.pose().enableY()
+            ? pose_twist.linear().y() : ref_state.twist().linear().y();
+        selected_twist.angular() = enabler.pose().enableN()
+            ? pose_twist.angular() : ref_state.twist().angular();
+
+        auto ref_tau = twist_controller_->step(
+            std::move(selected_twist), state.twist(), enabler.twist(), dt);
         return ref_tau;
     }
 

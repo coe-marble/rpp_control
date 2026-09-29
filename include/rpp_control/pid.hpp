@@ -1,4 +1,8 @@
 #pragma once
+#include <algorithm>
+#include <cmath>
+#include <stdexcept>
+
 #include <rpp_cpp/plugin.hpp>
 
 #include "control_defs.hpp"
@@ -23,62 +27,114 @@ namespace rpp_control {
         FP_TYPE integral_error_ = 0.0;
         FP_TYPE previous_error_ = 0.0;
         FP_TYPE previous_derivative_ = 0.0;
-        public:
-            PID(const PIDParameters& params) : params_(params) {}
-            virtual ~PID() = default;
+    public:
+        explicit PID(const PIDParameters& params) : params_(params)
+        {
+            validate_parameters(params_);
+        }
 
-            void set_parameters(const PIDParameters& params)
+        virtual ~PID() = default;
+
+        void set_parameters(const PIDParameters& params)
+        {
+            validate_parameters(params);
+            params_ = params;
+        }
+
+        FP_TYPE step(FP_TYPE ref, FP_TYPE state, FP_TYPE dt)
+        {
+            if (!std::isfinite(ref) || !std::isfinite(state)
+                || !std::isfinite(dt) || dt <= 0.0)
             {
-                params_ = params;
+                reset();
+                return 0.0;
             }
 
-            FP_TYPE step(FP_TYPE ref, FP_TYPE state, FP_TYPE dt)
+            const FP_TYPE error = ref - state;
+            if (!std::isfinite(error))
             {
-                FP_TYPE error = ref - state;
-                integral_error_ += error * dt;
-
-                if (params_.integral_limit > 0.0)
-                {
-                    if (integral_error_ > params_.integral_limit)
-                        integral_error_ = params_.integral_limit;
-                    else if (integral_error_ < -params_.integral_limit)
-                        integral_error_ = -params_.integral_limit;
-                }
-
-                if (params_.derivative_filter_coefficient > 0.0)
-                {
-                    FP_TYPE derivative = (error - previous_error_) / dt;
-                    FP_TYPE filtered_derivative =
-                        params_.derivative_filter_coefficient * previous_derivative_
-                        + (1.0 - params_.derivative_filter_coefficient) * derivative;
-                    previous_derivative_ = filtered_derivative;
-                }
-                else
-                {
-                    previous_derivative_ = (error - previous_error_) / dt;
-                }
-
-                FP_TYPE output = params_.kp * error
-                    + params_.ki * integral_error_
-                    + params_.kd * previous_derivative_;
-
-                if (params_.output_limit > 0.0)
-                {
-                    if (output > params_.output_limit)
-                        output = params_.output_limit;
-                    else if (output < -params_.output_limit)
-                        output = -params_.output_limit;
-                }
-
-                previous_error_ = error;
-                return output;
+                reset();
+                return 0.0;
             }
+
+            integral_error_ += error * dt;
+            if (!std::isfinite(integral_error_))
+            {
+                reset();
+                return 0.0;
+            }
+
+            if (params_.integral_limit > 0.0)
+            {
+                integral_error_ = std::clamp(integral_error_,
+                    -params_.integral_limit, params_.integral_limit);
+            }
+
+            const FP_TYPE derivative = (error - previous_error_) / dt;
+            if (!std::isfinite(derivative))
+            {
+                reset();
+                return 0.0;
+            }
+            if (params_.derivative_filter_coefficient > 0.0)
+            {
+                previous_derivative_ =
+                    params_.derivative_filter_coefficient * previous_derivative_
+                    + (1.0 - params_.derivative_filter_coefficient) * derivative;
+            }
+            else
+            {
+                previous_derivative_ = derivative;
+            }
+
+            FP_TYPE output = params_.kp * error
+                + params_.ki * integral_error_
+                + params_.kd * previous_derivative_;
+            if (!std::isfinite(output))
+            {
+                reset();
+                return 0.0;
+            }
+
+            if (params_.output_limit > 0.0)
+            {
+                output = std::clamp(output,
+                    -params_.output_limit, params_.output_limit);
+            }
+
+            previous_error_ = error;
+            return output;
+        }
 
         void reset()
         {
             integral_error_ = 0.0;
             previous_error_ = 0.0;
             previous_derivative_ = 0.0;
+        }
+
+    private:
+        static void validate_parameters(const PIDParameters& params)
+        {
+            if (!std::isfinite(params.kp) || !std::isfinite(params.ki)
+                || !std::isfinite(params.kd)
+                || !std::isfinite(params.output_limit)
+                || !std::isfinite(params.integral_limit)
+                || !std::isfinite(params.derivative_filter_coefficient))
+            {
+                throw std::invalid_argument("PID parameters must be finite.");
+            }
+            if (params.output_limit < 0.0 || params.integral_limit < 0.0)
+            {
+                throw std::invalid_argument(
+                    "PID output and integral limits must be non-negative.");
+            }
+            if (params.derivative_filter_coefficient < 0.0
+                || params.derivative_filter_coefficient >= 1.0)
+            {
+                throw std::invalid_argument(
+                    "PID derivative filter coefficient must be in [0, 1).");
+            }
         }
 
     };

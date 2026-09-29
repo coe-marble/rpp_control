@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <memory>
@@ -69,12 +70,6 @@ namespace rpp_control {
                 controller_ = context_->template get_component<ControllerComponent>("controller");
                 allocator_ = context_->template get_component<AllocatorComponent>("allocator");
 
-                auto num_commands = allocator_->outputSize();
-                RPP_LOG_INFO(*logger_, "Allocator output size: %d", num_commands);
-                state_live_.commands.resize(num_commands);
-
-
-
                 if (!controller_)
                 {
                     throw std::runtime_error("MotionController requires a controller component named 'controller'.");
@@ -85,6 +80,10 @@ namespace rpp_control {
                     throw std::runtime_error("MotionController requires an allocator component named 'allocator'.");
                 }
 
+                const auto num_commands = allocator_->outputSize();
+                RPP_LOG_INFO(*logger_, "Allocator output size: %d", num_commands);
+                state_live_.commands.resize(num_commands);
+
                 curr_state_msg_ = InputMessage{};
                 ref_state_msg_ = InputMessage{};
                 enabler_odom_msg_ = EnablerOdometry{};
@@ -94,41 +93,61 @@ namespace rpp_control {
 
             bool step(double dt)
             {
-
+                std::lock_guard<std::mutex> step_lock(step_mutex_);
                 if (!initialized_)
                 {
+                    clear_outputs();
                     return false;
                 }
 
                 if (!(dt > 0.0) || !std::isfinite(dt))
                 {
-                    return false;
+                    return stop_with_warning("Invalid control-loop time step. Stopping.");
                 }
 
-
-                auto curr_time_sec = context_->get_clock()->now_seconds();
+                const auto curr_time_sec = clock_->now_seconds();
+                if (!std::isfinite(curr_time_sec))
+                {
+                    return stop_with_warning("Invalid controller clock value. Stopping.");
+                }
                 latch_references(curr_time_sec);
                 {
                     std::lock_guard<std::mutex> lock(mutex_);
-                    state_locked_ = state_live_; // make a deep copy of the live state to work with
+                    state_locked_ = state_live_;
                 }
 
                 if (!state_locked_.has_feedback)
                 {
-                    RPP_LOG_WARN(*logger_, "No feedback received. Stopping.");
-                    return false;
+                    return stop_with_warning("No feedback received. Stopping.");
                 }
 
                 if (!state_locked_.has_any_pose_ext
                     && !state_locked_.has_any_twist_ext
                     && !state_locked_.has_any_wrench_ext)
                 {
-                    RPP_LOG_WARN(*logger_, "No external references received. Stopping.");
-                    return false;
+                    return stop_with_warning("No external references received. Stopping.");
+                }
+
+                if (!is_finite_array(state_locked_.pose)
+                    || !is_finite_array(state_locked_.twist)
+                    || !is_finite_array(state_locked_.pose_ref)
+                    || !is_finite_array(state_locked_.twist_ref)
+                    || !is_finite_array(state_locked_.wrench_ref))
+                {
+                    return stop_with_warning("Invalid control input. Stopping.");
+                }
+
+                auto twist_reference = state_locked_.twist_ref;
+                for (size_t i = 0; i < Dim::value; ++i)
+                {
+                    if (state_locked_.twist_selection[i] != SIGNAL_EXT)
+                    {
+                        twist_reference[i] = 0.0;
+                    }
                 }
 
                 Traits::make_input_message(
-                    state_locked_.pose_ref, state_locked_.twist_ref, ref_state_msg_
+                    state_locked_.pose_ref, twist_reference, ref_state_msg_
                 );
                 Traits::make_input_message(
                     state_locked_.pose, state_locked_.twist, curr_state_msg_
@@ -143,51 +162,82 @@ namespace rpp_control {
                     state_locked_.wrench_selection, std::move(enabler_odom_msg_.twist())
                 );
 
-                auto controller_command = controller_->step(
-                    ref_state_msg_.as_const(),
-                    curr_state_msg_.as_const(),
-                    enabler_odom_msg_.as_const(), dt);
-
-                // reuse the enabler_odom message to send to the allocator
-                Traits::make_enabler_message(
-                    active_dofs_, false,
-                    state_locked_.twist_selection, enabler_odom_msg_.twist()
-                );
-                auto allocated_result = allocator_->allocate(
-                    controller_command.shallow_copy(),
-                    curr_state_msg_.as_const(),
-                    enabler_odom_msg_.twist().as_const(),
-                    dt
-                );
-
-                last_step_time_ = curr_time_sec;
+                try
                 {
-                    std::lock_guard<std::mutex> lock(mutex_);
-                    Traits::parse_output_message(
-                        std::move(controller_command),
-                        std::move(allocated_result),
-                        state_live_.wrench_ref,
-                        state_live_.wrench,
-                        state_live_.commands
+                    auto controller_command = controller_->step(
+                        ref_state_msg_.as_const(),
+                        curr_state_msg_.as_const(),
+                        enabler_odom_msg_.as_const(), dt);
+                    auto requested_wrench = Traits::merge_wrench_reference(
+                        std::move(controller_command), state_locked_.wrench_ref,
+                        state_locked_.wrench_selection);
+                    if (!Traits::is_finite_wrench(requested_wrench))
+                    {
+                        return stop_with_warning(
+                            "Controller produced an invalid wrench. Stopping.");
+                    }
+
+                    Traits::make_enabler_message(
+                        active_dofs_, false,
+                        state_locked_.wrench_selection, enabler_odom_msg_.twist()
                     );
+                    auto allocated_result = allocator_->allocate(
+                        requested_wrench.shallow_copy(),
+                        curr_state_msg_.as_const(),
+                        enabler_odom_msg_.twist().as_const(),
+                        dt
+                    );
+                    if (!Traits::is_finite_allocation(allocated_result))
+                    {
+                        return stop_with_warning(
+                            "Allocator produced an invalid command. Stopping.");
+                    }
+
+                    last_step_time_ = curr_time_sec;
+                    {
+                        std::lock_guard<std::mutex> lock(mutex_);
+                        Traits::parse_output_message(
+                            std::move(requested_wrench),
+                            std::move(allocated_result),
+                            state_live_.wrench_ref,
+                            state_live_.wrench,
+                            state_live_.commands
+                        );
+                    }
+                }
+                catch (const std::exception& exception)
+                {
+                    RPP_LOG_ERROR_ONCE(*logger_,
+                        "Control update failed: %s. Stopping.", exception.what());
+                    clear_outputs();
+                    reset_controller();
+                    return false;
+                }
+                catch (...)
+                {
+                    RPP_LOG_ERROR_ONCE(*logger_,
+                        "Control update failed with an unknown error. Stopping.");
+                    clear_outputs();
+                    reset_controller();
+                    return false;
                 }
                 return true;
             }
 
             void start()
             {
-
             }
 
-
-            void update_live_state_with_command()
+            void stop()
             {
-                state_live_.wrench = state_locked_.wrench_ref;
-                state_live_.pwm = state_locked_.pwm;
+                std::lock_guard<std::mutex> step_lock(step_mutex_);
+                clear_outputs();
+                reset_controller();
             }
 
             void latch_references(double curr_time_sec)
             {
+                std::lock_guard<std::mutex> lock(mutex_);
                 state_live_.has_any_pose_ext = false;
                 state_live_.has_any_twist_ext = false;
                 state_live_.has_any_wrench_ext = false;
@@ -239,6 +289,12 @@ namespace rpp_control {
             void set_feedback(const PoseArray& pose, const TwistArray& twist)
             {
                 std::lock_guard<std::mutex> lock(mutex_);
+                if (!is_finite_array(pose) || !is_finite_array(twist))
+                {
+                    state_live_.has_feedback = false;
+                    feedback_time_ = 0.0;
+                    return;
+                }
                 state_live_.pose = pose;
                 state_live_.twist = twist;
                 state_live_.has_feedback = true;
@@ -269,18 +325,26 @@ namespace rpp_control {
 
             void set_references(const std::array<FP_TYPE, Dim::value>& ref_vec,
                 const std::array<bool, Dim::value>& selection_vec,
-                std::array<FP_TYPE, Dim::value>& current_ref_stamp_sec_,
+                std::array<double, Dim::value>& current_ref_stamp_sec_,
                 std::array<FP_TYPE, Dim::value>& io_ref_vec)
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                auto curr_time_sec = clock_->now_seconds();
+                const auto curr_time_sec = clock_->now_seconds();
                 for (size_t i = 0; i < Dim::value; i++)
                 {
                     if (selection_vec[i]
                         && is_active_dof(get_dof_by_index<Dim::value>(i)))
                     {
-                        io_ref_vec[i] = ref_vec[i];
-                        current_ref_stamp_sec_[i] = curr_time_sec;
+                        if (std::isfinite(ref_vec[i]) && std::isfinite(curr_time_sec))
+                        {
+                            io_ref_vec[i] = ref_vec[i];
+                            current_ref_stamp_sec_[i] = curr_time_sec;
+                        }
+                        else
+                        {
+                            io_ref_vec[i] = 0.0;
+                            current_ref_stamp_sec_[i] = 0.0;
+                        }
                     }
                 }
             }
@@ -305,6 +369,18 @@ namespace rpp_control {
                 }
             }
 
+            void set_wrench_selection_internal_unless_external()
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                for (auto& selection : state_live_.wrench_selection)
+                {
+                    if (selection != SIGNAL_EXT)
+                    {
+                        selection = SIGNAL_INT;
+                    }
+                }
+            }
+
             bool is_active_dof(DOF dof) const
             {
                 return (active_dofs_ & dof) != 0;
@@ -317,6 +393,7 @@ namespace rpp_control {
                 // 0 is dontcare
                 if (ref_type <= 0 || ref_type >= REF_END)
                     return false;
+                std::lock_guard<std::mutex> lock(mutex_);
                 for (int i = 0; i < 6; i++)
                 {
                     if (mask[i])
@@ -332,11 +409,90 @@ namespace rpp_control {
 
             bool check_control_identity_token(const FixedSizeString& identity_token)
             {
+                std::lock_guard<std::mutex> lock(mutex_);
                 return control_identity_token_.token == identity_token;
+            }
+
+            bool release_control_identity_token(const FixedSizeString& identity_token)
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (!control_identity_token_.is_set()
+                    || control_identity_token_.token != identity_token)
+                {
+                    return false;
+                }
+                control_identity_token_ = Identity{};
+                return true;
+            }
+
+            bool release_ref_identity_token(const FixedSizeString& identity_token)
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                bool released = false;
+                for (size_t ref_type = 1; ref_type < REF_END; ++ref_type)
+                {
+                    for (size_t i = 0; i < DOF_END_i; ++i)
+                    {
+                        size_t state_index = i;
+                        bool has_state_index = true;
+                        if constexpr (Dim::value == 3)
+                        {
+                            switch (i)
+                            {
+                            case DOF_X_i:
+                                state_index = 0;
+                                break;
+                            case DOF_Y_i:
+                                state_index = 1;
+                                break;
+                            case DOF_N_i:
+                                state_index = 2;
+                                break;
+                            default:
+                                has_state_index = false;
+                            }
+                        }
+                        auto& identity = ref_identities[ref_type][i];
+                        if (identity.is_set() && identity.token == identity_token)
+                        {
+                            identity = Identity{};
+                            if (has_state_index && ref_type == POSE_REF)
+                            {
+                                current_pose_ref_stamp_sec_[state_index] = 0.0;
+                                state_live_.pose_ref[state_index] = 0.0;
+                                state_live_.has_pose_ext[state_index] = false;
+                            }
+                            else if (has_state_index && ref_type == TWIST_REF)
+                            {
+                                current_twist_ref_stamp_sec_[state_index] = 0.0;
+                                state_live_.twist_ref[state_index] = 0.0;
+                                state_live_.has_twist_ext[state_index] = false;
+                            }
+                            else if (has_state_index && ref_type == WRENCH_REF)
+                            {
+                                current_wrench_ref_stamp_sec_[state_index] = 0.0;
+                                state_live_.wrench_ref[state_index] = 0.0;
+                                state_live_.has_wrench_ext[state_index] = false;
+                            }
+                            released = true;
+                        }
+                    }
+                }
+                if (released)
+                {
+                    state_live_.has_any_pose_ext = false;
+                    state_live_.has_any_twist_ext = false;
+                    state_live_.has_any_wrench_ext = false;
+                    state_live_.wrench.fill(0.0);
+                    std::fill(state_live_.commands.begin(),
+                        state_live_.commands.end(), 0.0);
+                }
+                return released;
             }
 
             std::pair<bool, FixedSizeString> try_request_control_identity_token(const FixedSizeString& identity_name)
             {
+                std::lock_guard<std::mutex> lock(mutex_);
                 if (control_identity_token_.is_set())
                 {
                     return {false, {}};
@@ -350,17 +506,33 @@ namespace rpp_control {
                 const FixedSizeString& identity_name,
                 std::array<ReferenceType, 6> mask)
             {
+                std::lock_guard<std::mutex> lock(mutex_);
+                bool has_reference = false;
                 for (size_t i = 0; i < 6; i++)
                 {
-                    auto ref_type = mask[i];
+                    const auto ref_type = mask[i];
+                    if (ref_type == IGNORE)
+                        continue;
                     if (ref_type <= 0 || ref_type >= REF_END)
+                        return {false, {}};
+                    if (!is_active_dof(get_dof_by_index<6>(i)))
                         return {false, {}};
                     if (ref_identities[ref_type][i].is_set())
                         return {false, {}};
-                    Identity::get_random_identity(identity_name,
-                        "ref", ref_identities[ref_type][i]);
+                    has_reference = true;
                 }
-                return {true, {}};
+                if (!has_reference)
+                    return {false, {}};
+
+                Identity identity;
+                Identity::get_random_identity(identity_name, "ref", identity);
+                for (size_t i = 0; i < 6; i++)
+                {
+                    const auto ref_type = mask[i];
+                    if (ref_type != IGNORE)
+                        ref_identities[ref_type][i] = identity;
+                }
+                return {true, identity.token};
             }
 
         protected:
@@ -375,6 +547,50 @@ namespace rpp_control {
             }
 
         private:
+
+            template <size_t Size>
+            static bool is_finite_array(const std::array<FP_TYPE, Size>& values)
+            {
+                return std::all_of(values.begin(), values.end(),
+                    [](const FP_TYPE value) { return std::isfinite(value); });
+            }
+
+            void clear_outputs()
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                state_live_.wrench.fill(0.0);
+                std::fill(state_live_.commands.begin(),
+                    state_live_.commands.end(), 0.0);
+            }
+
+            bool stop_with_warning(const char* message)
+            {
+                clear_outputs();
+                reset_controller();
+                RPP_LOG_WARN_ONCE(*logger_, "%s", message);
+                return false;
+            }
+
+            void reset_controller()
+            {
+                if (!controller_)
+                {
+                    return;
+                }
+                try
+                {
+                    controller_->reset();
+                }
+                catch (const std::exception& exception)
+                {
+                    RPP_LOG_ERROR_ONCE(*logger_,
+                        "Controller reset failed: %s.", exception.what());
+                }
+                catch (...)
+                {
+                    RPP_LOG_ERROR_ONCE(*logger_, "Controller reset failed.");
+                }
+            }
 
             void update_error(const typename ControllerIO::State& state, typename ControllerIO::Error& errors)
             {
@@ -453,6 +669,7 @@ namespace rpp_control {
             double latch_timeout_;
             double feedback_timeout_;
             double feedback_time_;
+            std::mutex step_mutex_;
             mutable std::mutex mutex_;
             typename ControllerIO::State state_live_;
             typename ControllerIO::State state_locked_;
@@ -464,9 +681,9 @@ namespace rpp_control {
             std::array<SignalStatus, Dim::value> current_wrench_selection_;
             std::array<SignalStatus, Dim::value> current_twist_selection_;
 
-            std::array<FP_TYPE, Dim::value> current_pose_ref_stamp_sec_;
-            std::array<FP_TYPE, Dim::value> current_twist_ref_stamp_sec_;
-            std::array<FP_TYPE, Dim::value> current_wrench_ref_stamp_sec_;
+            std::array<double, Dim::value> current_pose_ref_stamp_sec_;
+            std::array<double, Dim::value> current_twist_ref_stamp_sec_;
+            std::array<double, Dim::value> current_wrench_ref_stamp_sec_;
 
             Identity control_identity_token_;
             std::array<std::array<Identity, DOF_END_i>, REF_END> ref_identities = {{}};

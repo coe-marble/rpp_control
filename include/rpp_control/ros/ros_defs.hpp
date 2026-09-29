@@ -15,6 +15,8 @@
 #include <marble_control_msgs/msg/wrench_reference.hpp>
 #include <marble_control_msgs/srv/request_control.hpp>
 #include <marble_control_msgs/srv/request_external_reference.hpp>
+#include <marble_control_msgs/srv/release_control.hpp>
+#include <marble_control_msgs/srv/release_external_reference.hpp>
 #include <marble_control_msgs/srv/select_signal.hpp>
 
 
@@ -33,6 +35,9 @@ namespace rpp_control {
   using ControlStatus = marble_control_msgs::msg::ControlStatus;
   using ControlState = marble_control_msgs::msg::ControlState;
   using RequestExternalReference = marble_control_msgs::srv::RequestExternalReference;
+  using ReleaseControl = marble_control_msgs::srv::ReleaseControl;
+  using ReleaseExternalReference =
+    marble_control_msgs::srv::ReleaseExternalReference;
   using SelectSignal = marble_control_msgs::srv::SelectSignal;
 
 

@@ -1,5 +1,9 @@
 #pragma once
 
+#include <chrono>
+#include <memory>
+#include <vector>
+
 #include <rclcpp/rclcpp.hpp>
 #include <rpp_cpp/plugin.hpp>
 #include <rpp_cpp/context_builder.hpp>
@@ -13,6 +17,9 @@
 namespace rpp_control {
 
     class MotionControllerRos : public rclcpp::Node {
+
+    private:
+        std::unique_ptr<rpp::ComponentContext> context_;
 
     public:
         MotionControllerRos(const rclcpp::NodeOptions &options = rclcpp::NodeOptions());
@@ -34,6 +41,7 @@ namespace rpp_control {
         rclcpp::Publisher<ControlStatus>::SharedPtr status_pub_;
         rclcpp::Publisher<ControlState>::SharedPtr state_pub_;
         rclcpp::Publisher<Float32MultiArray>::SharedPtr pwm_out_pub_;
+        rclcpp::TimerBase::SharedPtr control_timer_;
 
     private:
         void set_wrench_selection_(
@@ -51,12 +59,30 @@ namespace rpp_control {
         void on_external_twist_dev_(TwistStamped::SharedPtr twist_ref);
         void on_external_pose_dev_(PoseStamped::SharedPtr eta_ref);
 
+        void on_control_timer_();
+        void publish_control_result_(bool control_active, double dt);
+
+        std::chrono::steady_clock::time_point last_control_tick_;
+        double max_control_dt_ = 0.0;
+        Float32MultiArray pwm_output_message_;
+        ControlState control_state_message_;
+        ControlStatus control_status_message_;
+
         // SERVICES
         rclcpp::Service<RequestExternalReference>::SharedPtr
             request_external_ref_svc_;
+        rclcpp::Service<ReleaseControl>::SharedPtr release_control_svc_;
+        rclcpp::Service<ReleaseExternalReference>::SharedPtr
+            release_external_ref_svc_;
         void request_external_ref_(
             RequestExternalReference::Request::SharedPtr request,
             RequestExternalReference::Response::SharedPtr response);
+        void release_control_(
+            ReleaseControl::Request::SharedPtr request,
+            ReleaseControl::Response::SharedPtr response);
+        void release_external_ref_(
+            ReleaseExternalReference::Request::SharedPtr request,
+            ReleaseExternalReference::Response::SharedPtr response);
 
         rclcpp::Service<RequestControl>::SharedPtr
             request_control_svc_;

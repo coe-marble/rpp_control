@@ -3,7 +3,9 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
+#include <random>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -199,14 +201,23 @@ struct Identity
     {
         out_identity.name = name;
         out_identity.token.fill('\0');
-        int random_num = std::rand() % 40000 + 10000;
 
-        std::snprintf(out_identity.token.begin(),
-                      out_identity.token.size(),
-                      "%.*s%d",
-                      static_cast<int>(prefix.size()),
-                      prefix.data(),
-                      random_num);
+        const size_t prefix_length = std::min(
+            prefix.size(), out_identity.token.data_.size() - 1);
+        std::copy_n(prefix.data(), prefix_length,
+            out_identity.token.begin());
+
+        // Identity tokens gate control authority. A 40,000-value rand()
+        // sequence was both predictable and prone to collisions.
+        static constexpr char hex_digits[] = "0123456789abcdef";
+        std::random_device random_device;
+        for (size_t i = prefix_length;
+             i < out_identity.token.data_.size() - 1; ++i)
+        {
+            out_identity.token.begin()[i] =
+                hex_digits[random_device() % (sizeof(hex_digits) - 1)];
+        }
+        out_identity.token.begin()[out_identity.token.data_.size() - 1] = '\0';
 
     }
 
