@@ -22,7 +22,7 @@ namespace rpp_control {
         static constexpr DOF default_active_dofs =
             static_cast<DOF>(DOF_X | DOF_Y | DOF_Z | DOF_K | DOF_M | DOF_N);
 
-        void make_input_message(
+        static void make_input_message(
             const std::array<FP_TYPE, 6>& pose,
             const std::array<FP_TYPE, 6>& twist,
             InputMessage& message)
@@ -51,27 +51,87 @@ namespace rpp_control {
             angular.z() = twist[5];
         }
 
-        void parse_output_message(
-            OutputMessage::Const message,
-            Command::Const out_commands,
+        static OutputMessage::Const merge_wrench_reference(
+            OutputMessage::Const internal_wrench,
+            const std::array<FP_TYPE, 6>& external_wrench,
+            const std::array<SignalStatus, 6>& selection)
+        {
+            OutputMessage merged_wrench;
+            auto force = merged_wrench.force();
+            force.x() = select_wrench_value(
+                internal_wrench.force().x(), external_wrench[0], selection[0]);
+            force.y() = select_wrench_value(
+                internal_wrench.force().y(), external_wrench[1], selection[1]);
+            force.z() = select_wrench_value(
+                internal_wrench.force().z(), external_wrench[2], selection[2]);
+            auto torque = merged_wrench.torque();
+            torque.x() = select_wrench_value(
+                internal_wrench.torque().x(), external_wrench[3], selection[3]);
+            torque.y() = select_wrench_value(
+                internal_wrench.torque().y(), external_wrench[4], selection[4]);
+            torque.z() = select_wrench_value(
+                internal_wrench.torque().z(), external_wrench[5], selection[5]);
+            return merged_wrench;
+        }
+
+        static bool is_finite_wrench(const OutputMessage::Const& wrench)
+        {
+            return std::isfinite(wrench.force().x())
+                && std::isfinite(wrench.force().y())
+                && std::isfinite(wrench.force().z())
+                && std::isfinite(wrench.torque().x())
+                && std::isfinite(wrench.torque().y())
+                && std::isfinite(wrench.torque().z());
+        }
+
+        static bool is_finite_allocation(
+            const std::tuple<Command::Const, OutputMessage::Const>& allocation)
+        {
+            if (!is_finite_wrench(std::get<1>(allocation)))
+            {
+                return false;
+            }
+            const auto commands = std::get<0>(allocation).data();
+            for (size_t i = 0; i < commands.size(); ++i)
+            {
+                if (!std::isfinite(commands[i]))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        static void parse_output_message(
+            OutputMessage::Const ref_message,
+            const std::tuple<Command::Const, OutputMessage::Const>& out_commands,
+            std::array<FP_TYPE, 6>& wrench_ref,
             std::array<FP_TYPE, 6>& wrench,
             std::vector<FP_TYPE>& commands)
         {
-            wrench[0] = message.force().x();
-            wrench[1] = message.force().y();
-            wrench[2] = message.force().z();
-            wrench[3] = message.torque().x();
-            wrench[4] = message.torque().y();
-            wrench[5] = message.torque().z();
+            wrench_ref[0] = ref_message.force().x();
+            wrench_ref[1] = ref_message.force().y();
+            wrench_ref[2] = ref_message.force().z();
+            wrench_ref[3] = ref_message.torque().x();
+            wrench_ref[4] = ref_message.torque().y();
+            wrench_ref[5] = ref_message.torque().z();
+            wrench[0] = std::get<1>(out_commands).force().x();
+            wrench[1] = std::get<1>(out_commands).force().y();
+            wrench[2] = std::get<1>(out_commands).force().z();
+            wrench[3] = std::get<1>(out_commands).torque().x();
+            wrench[4] = std::get<1>(out_commands).torque().y();
+            wrench[5] = std::get<1>(out_commands).torque().z();
 
-            size_t min_sz = std::min(out_commands.data().size(), commands.size());
+            std::fill(commands.begin(), commands.end(), 0.0);
+            size_t min_sz = std::min(
+                std::get<0>(out_commands).data().size(), commands.size());
             for (size_t i = 0; i < min_sz; ++i)
             {
-                commands[i] = out_commands.data()[i];
+                commands[i] = std::get<0>(out_commands).data()[i];
             }
         }
 
-        void make_enabler_message(
+        static void make_enabler_message(
             DOF active_dofs,
             bool use_selection,
             const std::array<SignalStatus, 6>& selection,
@@ -89,6 +149,21 @@ namespace rpp_control {
             enabler.enableK() = is_enabled(DOF_K, 3);
             enabler.enableM() = is_enabled(DOF_M, 4);
             enabler.enableN() = is_enabled(DOF_N, 5);
+        }
+
+    private:
+        static FP_TYPE select_wrench_value(const double internal_value,
+            const FP_TYPE external_value, const SignalStatus selection)
+        {
+            if (selection == SIGNAL_INT)
+            {
+                return static_cast<FP_TYPE>(internal_value);
+            }
+            if (selection == SIGNAL_EXT)
+            {
+                return external_value;
+            }
+            return 0.0;
         }
 
 
