@@ -7,6 +7,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rpp_cpp/plugin.hpp>
 #include <rpp_cpp/context_builder.hpp>
+#include <rpp_cpp/logger.hpp>
 
 #include "ros_defs.hpp"
 #include "../utils.hpp"
@@ -19,6 +20,7 @@ namespace rpp_control {
     class MotionControllerRos : public rclcpp::Node {
 
     private:
+        std::shared_ptr<rpp::RppLogger> logger_;
         std::unique_ptr<rpp::ComponentContext> context_;
 
     public:
@@ -34,13 +36,13 @@ namespace rpp_control {
         rclcpp::Subscription<PoseReference>::SharedPtr pose_ext_sub_;
         rclcpp::Subscription<NavigationStatus>::SharedPtr navigation_status_sub_;
 
-        rclcpp::Subscription<PoseStamped>::SharedPtr pose_ref_sub_dev_;
-        rclcpp::Subscription<TwistStamped>::SharedPtr twist_ref_sub_dev_;
-        rclcpp::Subscription<WrenchStamped>::SharedPtr wrench_ref_sub_dev_;
+        rclcpp::Subscription<Pose>::SharedPtr pose_ref_sub_dev_;
+        rclcpp::Subscription<Twist>::SharedPtr twist_ref_sub_dev_;
+        rclcpp::Subscription<Wrench>::SharedPtr wrench_ref_sub_dev_;
 
         rclcpp::Publisher<ControlStatus>::SharedPtr status_pub_;
         rclcpp::Publisher<ControlState>::SharedPtr state_pub_;
-        rclcpp::Publisher<Float32MultiArray>::SharedPtr pwm_out_pub_;
+        rclcpp::Publisher<Float64MultiArray>::SharedPtr cmd_out_pub_;
         rclcpp::TimerBase::SharedPtr control_timer_;
 
     private:
@@ -55,16 +57,17 @@ namespace rpp_control {
         void on_external_pose_(PoseReference::SharedPtr eta_ref);
         void on_navigation_status_(NavigationStatus::SharedPtr nav_status);
 
-        void on_external_wrench_dev_(WrenchStamped::SharedPtr wrench_ref);
-        void on_external_twist_dev_(TwistStamped::SharedPtr twist_ref);
-        void on_external_pose_dev_(PoseStamped::SharedPtr eta_ref);
+        void on_external_wrench_dev_(Wrench::SharedPtr wrench_ref);
+        void on_external_twist_dev_(Twist::SharedPtr twist_ref);
+        void on_external_pose_dev_(Pose::SharedPtr eta_ref);
 
         void on_control_timer_();
         void publish_control_result_(bool control_active, double dt);
 
         std::chrono::steady_clock::time_point last_control_tick_;
         double max_control_dt_ = 0.0;
-        Float32MultiArray pwm_output_message_;
+        Float32MultiArray cmd_out_state_message_;
+        Float64MultiArray cmd_out_message_;
         ControlState control_state_message_;
         ControlStatus control_status_message_;
 

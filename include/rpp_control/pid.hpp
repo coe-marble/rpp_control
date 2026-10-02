@@ -17,6 +17,7 @@ namespace rpp_control {
         RPP_MEMBER(FP_TYPE, kd, 0.0),
         RPP_MEMBER(FP_TYPE, output_limit, 0.0),
         RPP_MEMBER(FP_TYPE, integral_limit, 0.0),
+        RPP_MEMBER(FP_TYPE, anti_windup_gain, 1.0),
         RPP_MEMBER(FP_TYPE, derivative_filter_coefficient, 0.0)
     )
 
@@ -57,17 +58,22 @@ namespace rpp_control {
                 return 0.0;
             }
 
-            integral_error_ += error * dt;
-            if (!std::isfinite(integral_error_))
+            FP_TYPE candidate_integral_error = integral_error_;
+            if (params_.ki != 0.0)
             {
-                reset();
-                return 0.0;
-            }
+                candidate_integral_error += error * dt;
+                if (!std::isfinite(candidate_integral_error))
+                {
+                    reset();
+                    return 0.0;
+                }
 
-            if (params_.integral_limit > 0.0)
-            {
-                integral_error_ = std::clamp(integral_error_,
-                    -params_.integral_limit, params_.integral_limit);
+                if (params_.integral_limit > 0.0)
+                {
+                    candidate_integral_error = std::clamp(
+                        candidate_integral_error, -params_.integral_limit,
+                        params_.integral_limit);
+                }
             }
 
             const FP_TYPE derivative = (error - previous_error_) / dt;
@@ -88,7 +94,7 @@ namespace rpp_control {
             }
 
             FP_TYPE output = params_.kp * error
-                + params_.ki * integral_error_
+                + params_.ki * candidate_integral_error
                 + params_.kd * previous_derivative_;
             if (!std::isfinite(output))
             {
@@ -98,10 +104,28 @@ namespace rpp_control {
 
             if (params_.output_limit > 0.0)
             {
+                const FP_TYPE integral_contribution = params_.ki
+                    * (candidate_integral_error - integral_error_);
+                const bool grows_upper_saturation =
+                    output > params_.output_limit
+                    && integral_contribution > 0.0;
+                const bool grows_lower_saturation =
+                    output < -params_.output_limit
+                    && integral_contribution < 0.0;
+                if (grows_upper_saturation || grows_lower_saturation)
+                {
+                    candidate_integral_error = integral_error_
+                        + (1.0 - params_.anti_windup_gain)
+                        * (candidate_integral_error - integral_error_);
+                    output = params_.kp * error
+                        + params_.ki * candidate_integral_error
+                        + params_.kd * previous_derivative_;
+                }
                 output = std::clamp(output,
                     -params_.output_limit, params_.output_limit);
             }
 
+            integral_error_ = candidate_integral_error;
             previous_error_ = error;
             return output;
         }
@@ -120,14 +144,17 @@ namespace rpp_control {
                 || !std::isfinite(params.kd)
                 || !std::isfinite(params.output_limit)
                 || !std::isfinite(params.integral_limit)
+                || !std::isfinite(params.anti_windup_gain)
                 || !std::isfinite(params.derivative_filter_coefficient))
             {
                 throw std::invalid_argument("PID parameters must be finite.");
             }
-            if (params.output_limit < 0.0 || params.integral_limit < 0.0)
+            if (params.output_limit < 0.0 || params.integral_limit < 0.0
+                || params.anti_windup_gain < 0.0
+                || params.anti_windup_gain > 1.0)
             {
                 throw std::invalid_argument(
-                    "PID output and integral limits must be non-negative.");
+                    "PID limits must be non-negative and anti_windup_gain must be in [0, 1].");
             }
             if (params.derivative_filter_coefficient < 0.0
                 || params.derivative_filter_coefficient >= 1.0)

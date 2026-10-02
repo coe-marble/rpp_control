@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <memory>
 #include <mutex>
@@ -43,6 +44,17 @@ namespace rpp_control {
             using TwistArray = std::array<FP_TYPE, Dim::value>;
             using WrenchArray = std::array<FP_TYPE, Dim::value>;
 
+            struct AllocationSuppression
+            {
+                DOF priority_dof = NO_DOF;
+                DOF suppressed_dof = NO_DOF;
+                double priority_request_threshold = 0.0;
+                double residual_activation_threshold = 0.0;
+                double residual_deactivation_threshold = 0.0;
+                bool active = false;
+                WrenchArray previous_requested_wrench{};
+            };
+
             explicit MotionControllerT(const rpp::ComponentContext& context)
                 : context_(&context),
                   active_dofs_(Traits::default_active_dofs),
@@ -66,6 +78,9 @@ namespace rpp_control {
 
             void initialize()
             {
+                RPP_LOG_DEBUG(*logger_,
+                    "Initializing motion controller active_dofs=0x%x.",
+                    static_cast<unsigned int>(active_dofs_));
                 context_->initialize(); // initializes all subcomponents
                 controller_ = context_->template get_component<ControllerComponent>("controller");
                 allocator_ = context_->template get_component<AllocatorComponent>("allocator");
@@ -89,6 +104,7 @@ namespace rpp_control {
                 enabler_odom_msg_ = EnablerOdometry{};
 
                 initialized_ = true;
+                RPP_LOG_DEBUG(*logger_, "Motion controller initialized.");
             }
 
             bool step(double dt)
@@ -111,8 +127,13 @@ namespace rpp_control {
                     return stop_with_warning("Invalid controller clock value. Stopping.");
                 }
                 latch_references(curr_time_sec);
+                DOF control_dofs = NO_DOF;
+                DOF allocation_dofs = NO_DOF;
                 {
                     std::lock_guard<std::mutex> lock(mutex_);
+                    allocation_dofs = active_dofs_;
+                    control_dofs = update_allocation_suppression_locked(
+                        state_live_);
                     state_locked_ = state_live_;
                 }
 
@@ -154,11 +175,11 @@ namespace rpp_control {
                 );
 
                 Traits::make_enabler_message(
-                    active_dofs_, true,
+                    control_dofs, true,
                     state_locked_.twist_selection, std::move(enabler_odom_msg_.pose())
                 );
                 Traits::make_enabler_message(
-                    active_dofs_, true,
+                    control_dofs, true,
                     state_locked_.wrench_selection, std::move(enabler_odom_msg_.twist())
                 );
 
@@ -178,7 +199,7 @@ namespace rpp_control {
                     }
 
                     Traits::make_enabler_message(
-                        active_dofs_, false,
+                        allocation_dofs, false,
                         state_locked_.wrench_selection, enabler_odom_msg_.twist()
                     );
                     auto allocated_result = allocator_->allocate(
@@ -203,7 +224,21 @@ namespace rpp_control {
                             state_live_.wrench,
                             state_live_.commands
                         );
+                        allocation_suppression_.previous_requested_wrench =
+                            state_live_.wrench_ref;
                     }
+                    RPP_LOG_DEBUG_THROTTLE(*logger_,
+                        std::chrono::milliseconds(500),
+                        "Control step completed time=%.3f dt=%.3f "
+                        "control_dofs=0x%x allocation_dofs=0x%x "
+                        "feedback=%d pose_ref=%d twist_ref=%d wrench_ref=%d.",
+                        curr_time_sec, dt,
+                        static_cast<unsigned int>(control_dofs),
+                        static_cast<unsigned int>(allocation_dofs),
+                        state_locked_.has_feedback,
+                        state_locked_.has_any_pose_ext,
+                        state_locked_.has_any_twist_ext,
+                        state_locked_.has_any_wrench_ext);
                 }
                 catch (const std::exception& exception)
                 {
@@ -226,6 +261,7 @@ namespace rpp_control {
 
             void start()
             {
+                RPP_LOG_DEBUG(*logger_, "Motion controller started.");
             }
 
             void stop()
@@ -233,6 +269,7 @@ namespace rpp_control {
                 std::lock_guard<std::mutex> step_lock(step_mutex_);
                 clear_outputs();
                 reset_controller();
+                RPP_LOG_DEBUG(*logger_, "Motion controller stopped.");
             }
 
             void latch_references(double curr_time_sec)
@@ -286,6 +323,98 @@ namespace rpp_control {
                 active_dofs = active_dofs_;
             }
 
+            void set_active_dofs(const DOF active_dofs)
+            {
+                const auto requested = static_cast<int>(active_dofs);
+                const auto supported = static_cast<int>(
+                    Traits::default_active_dofs);
+                if (requested == static_cast<int>(NO_DOF)
+                    || (requested & ~supported) != 0)
+                {
+                    throw std::invalid_argument(
+                        "Active DOFs must be a non-empty subset of the controller DOFs.");
+                }
+
+                std::lock_guard<std::mutex> lock(mutex_);
+                active_dofs_ = active_dofs;
+                RPP_LOG_DEBUG(*logger_, "Active DOFs set to 0x%x.",
+                    static_cast<unsigned int>(active_dofs_));
+                if ((active_dofs_ & allocation_suppression_.priority_dof)
+                        == NO_DOF
+                    || (active_dofs_ & allocation_suppression_.suppressed_dof)
+                        == NO_DOF)
+                {
+                    allocation_suppression_.active = false;
+                }
+                for (size_t i = 0; i < Dim::value; ++i)
+                {
+                    if ((active_dofs_ & get_dof_by_index<Dim::value>(i)) != 0)
+                    {
+                        continue;
+                    }
+                    state_live_.pose_ref[i] = 0.0;
+                    state_live_.twist_ref[i] = 0.0;
+                    state_live_.wrench_ref[i] = 0.0;
+                    state_live_.has_pose_ext[i] = false;
+                    state_live_.has_twist_ext[i] = false;
+                    state_live_.has_wrench_ext[i] = false;
+                    current_pose_ref_stamp_sec_[i] = 0.0;
+                    current_twist_ref_stamp_sec_[i] = 0.0;
+                    current_wrench_ref_stamp_sec_[i] = 0.0;
+                }
+            }
+
+            void set_allocation_suppression(
+                const DOF priority_dof, const DOF suppressed_dof,
+                const double priority_request_threshold,
+                const double residual_activation_threshold,
+                const double residual_deactivation_threshold)
+            {
+                if (!is_single_supported_dof(priority_dof)
+                    || !is_single_supported_dof(suppressed_dof)
+                    || priority_dof == suppressed_dof)
+                {
+                    throw std::invalid_argument(
+                        "Allocation priority and suppressed DOFs must be distinct supported axes.");
+                }
+                if (!std::isfinite(priority_request_threshold)
+                    || !std::isfinite(residual_activation_threshold)
+                    || !std::isfinite(residual_deactivation_threshold)
+                    || priority_request_threshold < 0.0
+                    || residual_deactivation_threshold < 0.0
+                    || residual_activation_threshold <= residual_deactivation_threshold)
+                {
+                    throw std::invalid_argument(
+                        "Allocation suppression thresholds must be finite, non-negative, and have activation greater than deactivation.");
+                }
+
+                std::lock_guard<std::mutex> lock(mutex_);
+                if ((active_dofs_ & priority_dof) == NO_DOF
+                    || (active_dofs_ & suppressed_dof) == NO_DOF)
+                {
+                    throw std::invalid_argument(
+                        "Allocation suppression DOFs must be active for this controller.");
+                }
+                allocation_suppression_.priority_dof = priority_dof;
+                allocation_suppression_.suppressed_dof = suppressed_dof;
+                allocation_suppression_.priority_request_threshold =
+                    priority_request_threshold;
+                allocation_suppression_.residual_activation_threshold =
+                    residual_activation_threshold;
+                allocation_suppression_.residual_deactivation_threshold =
+                    residual_deactivation_threshold;
+                allocation_suppression_.active = false;
+                RPP_LOG_DEBUG(*logger_,
+                    "Allocation suppression configured priority_dof=0x%x "
+                    "suppressed_dof=0x%x request_threshold=%.3f "
+                    "activation_threshold=%.3f deactivation_threshold=%.3f.",
+                    static_cast<unsigned int>(priority_dof),
+                    static_cast<unsigned int>(suppressed_dof),
+                    priority_request_threshold,
+                    residual_activation_threshold,
+                    residual_deactivation_threshold);
+            }
+
             void set_feedback(const PoseArray& pose, const TwistArray& twist)
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -293,6 +422,8 @@ namespace rpp_control {
                 {
                     state_live_.has_feedback = false;
                     feedback_time_ = 0.0;
+                    RPP_LOG_DEBUG_ONCE(*logger_,
+                        "Ignoring non-finite feedback.");
                     return;
                 }
                 state_live_.pose = pose;
@@ -353,9 +484,15 @@ namespace rpp_control {
                 const std::array<SignalStatus, Dim::value>& twist_selection)
             {
                 std::lock_guard<std::mutex> lock(mutex_);
+                const bool changed =
+                    state_live_.twist_selection != twist_selection;
                 for (size_t i = 0; i < Dim::value; i++)
                 {
                     state_live_.twist_selection[i] = twist_selection[i];
+                }
+                if (changed)
+                {
+                    RPP_LOG_DEBUG(*logger_, "Twist signal selection updated.");
                 }
             }
 
@@ -363,21 +500,34 @@ namespace rpp_control {
                 const std::array<SignalStatus, Dim::value>& wrench_selection)
             {
                 std::lock_guard<std::mutex> lock(mutex_);
+                const bool changed =
+                    state_live_.wrench_selection != wrench_selection;
                 for (size_t i = 0; i < Dim::value; i++)
                 {
                     state_live_.wrench_selection[i] = wrench_selection[i];
+                }
+                if (changed)
+                {
+                    RPP_LOG_DEBUG(*logger_, "Wrench signal selection updated.");
                 }
             }
 
             void set_wrench_selection_internal_unless_external()
             {
                 std::lock_guard<std::mutex> lock(mutex_);
+                bool changed = false;
                 for (auto& selection : state_live_.wrench_selection)
                 {
                     if (selection != SIGNAL_EXT)
                     {
+                        changed = changed || selection != SIGNAL_INT;
                         selection = SIGNAL_INT;
                     }
+                }
+                if (changed)
+                {
+                    RPP_LOG_DEBUG(*logger_,
+                        "Wrench selection set to internal where not external.");
                 }
             }
 
@@ -561,6 +711,102 @@ namespace rpp_control {
                 state_live_.wrench.fill(0.0);
                 std::fill(state_live_.commands.begin(),
                     state_live_.commands.end(), 0.0);
+                state_live_.allocation_suppressed.fill(false);
+                allocation_suppression_.active = false;
+                allocation_suppression_.previous_requested_wrench.fill(0.0);
+            }
+
+            static bool is_single_supported_dof(const DOF dof)
+            {
+                const auto value = static_cast<int>(dof);
+                const auto supported = static_cast<int>(
+                    Traits::default_active_dofs);
+                return value != 0 && (value & (value - 1)) == 0
+                    && (value & ~supported) == 0;
+            }
+
+            static size_t dof_index(const DOF dof)
+            {
+                for (size_t index = 0; index < Dim::value; ++index)
+                {
+                    if (get_dof_by_index<Dim::value>(index) == dof)
+                    {
+                        return index;
+                    }
+                }
+                return Dim::value;
+            }
+
+            DOF update_allocation_suppression_locked(
+                typename ControllerIO::State& state)
+            {
+                state.allocation_suppressed.fill(false);
+                if (allocation_suppression_.priority_dof == NO_DOF
+                    || allocation_suppression_.suppressed_dof == NO_DOF
+                    || (active_dofs_ & allocation_suppression_.priority_dof)
+                        == NO_DOF
+                    || (active_dofs_ & allocation_suppression_.suppressed_dof)
+                        == NO_DOF)
+                {
+                    allocation_suppression_.active = false;
+                    return active_dofs_;
+                }
+
+                const size_t priority_index = dof_index(
+                    allocation_suppression_.priority_dof);
+                const size_t suppressed_index = dof_index(
+                    allocation_suppression_.suppressed_dof);
+                if (priority_index == Dim::value || suppressed_index == Dim::value)
+                {
+                    allocation_suppression_.active = false;
+                    return active_dofs_;
+                }
+
+                const FP_TYPE priority_request =
+                    allocation_suppression_.previous_requested_wrench[
+                        priority_index];
+                const FP_TYPE suppressed_residual = std::abs(
+                    allocation_suppression_.previous_requested_wrench[
+                        suppressed_index]
+                    - state.wrench[suppressed_index]);
+                if (!std::isfinite(priority_request)
+                    || !std::isfinite(suppressed_residual))
+                {
+                    allocation_suppression_.active = false;
+                    return active_dofs_;
+                }
+
+                const bool priority_requested = std::abs(priority_request)
+                    > allocation_suppression_.priority_request_threshold;
+                const bool was_active = allocation_suppression_.active;
+                const double threshold = allocation_suppression_.active
+                    ? allocation_suppression_.residual_deactivation_threshold
+                    : allocation_suppression_.residual_activation_threshold;
+                allocation_suppression_.active = priority_requested
+                    && suppressed_residual >= threshold;
+                if (allocation_suppression_.active != was_active)
+                {
+                    RPP_LOG_DEBUG(*logger_,
+                        "Allocation suppression %s priority_dof=0x%x "
+                        "request=%.3f suppressed_dof=0x%x residual=%.3f "
+                        "threshold=%.3f.",
+                        allocation_suppression_.active ? "enabled" : "disabled",
+                        static_cast<unsigned int>(
+                            allocation_suppression_.priority_dof),
+                        static_cast<double>(priority_request),
+                        static_cast<unsigned int>(
+                            allocation_suppression_.suppressed_dof),
+                        static_cast<double>(suppressed_residual),
+                        threshold);
+                }
+                if (!allocation_suppression_.active)
+                {
+                    return active_dofs_;
+                }
+
+                state.allocation_suppressed[suppressed_index] = true;
+                return static_cast<DOF>(static_cast<int>(active_dofs_)
+                    & ~static_cast<int>(allocation_suppression_.suppressed_dof));
             }
 
             bool stop_with_warning(const char* message)
@@ -669,6 +915,7 @@ namespace rpp_control {
             double latch_timeout_;
             double feedback_timeout_;
             double feedback_time_;
+            AllocationSuppression allocation_suppression_;
             std::mutex step_mutex_;
             mutable std::mutex mutex_;
             typename ControllerIO::State state_live_;

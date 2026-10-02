@@ -1,5 +1,5 @@
 {
-    "ScriptPath": "include/rpp_control/motion_controller2d.hpp",
+    "ScriptPath": "include/rpp_control/motion_controller2d_impl.hpp",
     "Language": "cpp",
     "Spec": {
         "controller": "rpp_testing::MotionController2D",

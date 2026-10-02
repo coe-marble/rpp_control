@@ -2,14 +2,14 @@
     "Library": "rpp_control",
     "Plugins": [
         {
-            "Type": "file",
+            "Name": "PIDPoseController2D",
             "Path": "plugins/controllers/pid_pose_controller.hpp",
-            "Name": "PIDPoseController"
+            "Type": "file"
         },
         {
-            "Type": "file",
+            "Name": "PIDTwistController2D",
             "Path": "plugins/controllers/pid_twist_controller.hpp",
-            "Name": "PIDTwistController"
+            "Type": "file"
         },
         {
             "Name": "CascadeController2D",
@@ -17,7 +17,7 @@
             "Type": "file"
         },
         {
-            "Name": "rpp_control::WaterjetAllocator",
+            "Name": "WaterjetAllocator",
             "Path": "plugins/allocators/waterjet_allocator.hpp",
             "Type": "file"
         }
@@ -27,6 +27,5 @@
             "Path": "plugin_types/controllers.capnp",
             "Type": "file"
         }
-
     ]
 }

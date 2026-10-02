@@ -61,8 +61,12 @@ public:
         const double tau_x = enabler.enableX() ? ref_wrench.force().x() : 0.0;
         const double tau_y = enabler.enableY() ? ref_wrench.force().y() : 0.0;
         const double tau_n = enabler.enableN() ? ref_wrench.torque() : 0.0;
-        const double requested_y_force = std::abs(jet_x_) > 1e-6
-            ? tau_y + (tau_n + jet_y_ * tau_x) / jet_x_
+        // A single nozzle has only two independent wrench directions. When
+        // yaw is enabled, its lateral force is reserved for yaw; otherwise it
+        // can be used for direct sway control.
+        const double requested_y_force = enabler.enableN()
+            && std::abs(jet_x_) > 1e-6
+            ? (tau_n + jet_y_ * tau_x) / jet_x_
             : tau_y;
         const double current_u = state.twist().linear().x();
         const double current_r = state.twist().angular();
@@ -83,22 +87,22 @@ public:
             ? (max_restoring_moment - std::abs(roll_moment_centripetal)) / z_cg_
             : 0.0;
 
-        double thrust = std::hypot(tau_x, requested_y_force);
-        double angle = thrust > 0.001
-            ? std::atan2(requested_y_force, tau_x)
-            : 0.0;
-        thrust = std::min(thrust, max_thrust_);
-
-        const double requested_fy_jet = thrust * std::sin(angle);
-        if (std::abs(requested_fy_jet) > max_allowable_fy_jet)
-        {
-            const double safe_fy_jet =
-                std::copysign(max_allowable_fy_jet, requested_fy_jet);
-            const double fx_jet = thrust * std::cos(angle);
-            angle = std::atan2(safe_fy_jet, fx_jet);
-            thrust = std::min(std::hypot(fx_jet, safe_fy_jet), max_thrust_);
-        }
-
+        const double max_lateral_force = std::min(max_allowable_fy_jet,
+            max_thrust_ * std::sin(max_angle_));
+        const double allocated_y_force = std::clamp(requested_y_force,
+            -max_lateral_force, max_lateral_force);
+        const double thrust_direction = tau_x < 0.0 ? -1.0 : 1.0;
+        const double min_abs_x_force = std::abs(allocated_y_force)
+            / std::tan(max_angle_);
+        const double max_abs_x_force = std::sqrt(std::max(0.0,
+            max_thrust_ * max_thrust_
+            - allocated_y_force * allocated_y_force));
+        const double allocated_abs_x_force = std::min(
+            std::max(std::abs(tau_x), min_abs_x_force), max_abs_x_force);
+        double thrust = thrust_direction * std::hypot(
+            allocated_abs_x_force, allocated_y_force);
+        double angle = std::atan2(thrust_direction * allocated_y_force,
+            allocated_abs_x_force);
         angle = std::clamp(angle, -max_angle_, max_angle_);
         if (!std::isfinite(thrust) || !std::isfinite(angle))
         {
@@ -107,8 +111,8 @@ public:
 
         Command out_command;
         out_command.data().resize(2);
-        out_command.data()[0] = thrust;
-        out_command.data()[1] = angle;
+        out_command.data()[0] = thrust / max_thrust_;
+        out_command.data()[1] = angle / max_angle_;
 
         Wrench2D allocated_wrench;
         allocated_wrench.force().x() = thrust * std::cos(angle);
@@ -156,7 +160,7 @@ private:
             throw std::invalid_argument(
                 "Waterjet allocator parameters must be finite.");
         }
-        if (max_thrust_ < 0.0 || max_angle_ < 0.0
+        if (max_thrust_ <= 0.0 || max_angle_ <= 0.0
             || max_angle_ > kPi / 2.0 || mass_ <= 0.0 || z_cg_ <= 0.0
             || metacentric_height_ <= 0.0 || max_safe_roll_rad_ < 0.0
             || max_safe_roll_rad_ >= kPi / 2.0

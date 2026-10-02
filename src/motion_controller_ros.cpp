@@ -1,12 +1,17 @@
 #include <rpp_control/ros/motion_controller_ros.hpp>
 
+#include <rpp_cpp/data_manager.hpp>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <tuple>
+#include <limits>
+#include <stdexcept>
+#include <string>
 #include <type_traits>
+#include <vector>
 
 namespace {
 
@@ -65,42 +70,27 @@ namespace rpp_control {
 
 MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
     : Node("motion_controller", options),
+        logger_(std::make_shared<rpp::RppLogger>(this->get_logger().get_name())),
         controller_(std::monostate{})
 {
     using std::placeholders::_1;
     using std::placeholders::_2;
-    RCLCPP_INFO(this->get_logger(), "MotionControllerRos node has been started.");
+    RPP_LOG_INFO(*logger_, "MotionControllerRos node has been started.");
 
     std::string type = this->declare_parameter("controller_type", "2D");
 
-    const std::string script_description_path = this->declare_parameter(
-        "script_description_path", "");
-    const std::string component_path = this->declare_parameter(
-        "component_path", "");
-
-    if (!script_description_path.empty() && !component_path.empty())
+    const std::string rpp_workspace = this->declare_parameter(
+        "rpp_workspace", "");
+    if (rpp_workspace.empty())
     {
-        throw std::runtime_error(
-            "Specify either 'script_description_path' or 'component_path', not both.");
-    }
-    if (script_description_path.empty() && component_path.empty())
-    {
-        throw std::runtime_error(
-            "Parameter 'script_description_path' or 'component_path' must be specified.");
+        throw std::runtime_error("rpp_workspace must be specified.");
     }
 
-    rpp::ComponentContextBuilder context_builder;
-    if (!script_description_path.empty())
-    {
-        context_ = std::make_unique<rpp::ComponentContext>(
-            context_builder.build_script_from_description_path(
-                script_description_path));
-    }
-    else
-    {
-        context_ = std::make_unique<rpp::ComponentContext>(
-            context_builder.build_component_from_path(component_path));
-    }
+    rpp::RppDataManager data_manager(rpp::RPP_HOME, rpp_workspace);
+    rpp::ComponentContextBuilder context_builder(data_manager);
+    context_ = std::make_unique<rpp::ComponentContext>(
+        context_builder.build_script_from_library(
+            "rpp_control", "motion_controller2d_impl"));
 
     if (type == "2D")
     {
@@ -114,6 +104,91 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
     {
         throw std::runtime_error(
             "Invalid controller_type parameter. Must be '2D' or '3D'.");
+    }
+
+    const std::vector<std::string> default_active_dofs = type == "2D"
+        ? std::vector<std::string>{"x", "y", "yaw"}
+        : std::vector<std::string>{
+            "x", "y", "z", "roll", "pitch", "yaw"};
+    const auto active_dof_names = declare_parameter<std::vector<std::string>>(
+        "active_dofs", default_active_dofs);
+    DOF active_dofs = NO_DOF;
+    for (const auto& dof_name : active_dof_names)
+    {
+        const DOF dof = get_dof_by_name(dof_name);
+        if (dof == NO_DOF)
+        {
+            throw std::runtime_error("Unknown active DOF: " + dof_name);
+        }
+        active_dofs = static_cast<DOF>(
+            static_cast<int>(active_dofs) | static_cast<int>(dof));
+    }
+
+    rcl_interfaces::msg::ParameterDescriptor allocation_dof_descriptor;
+    allocation_dof_descriptor.description =
+        "Higher-priority or lower-priority DOF for allocation feedback.";
+    allocation_dof_descriptor.read_only = true;
+    const std::string allocation_priority_dof_name = declare_parameter(
+        "allocation_priority_dof", "", allocation_dof_descriptor);
+    const std::string allocation_suppressed_dof_name = declare_parameter(
+        "allocation_suppressed_dof", "", allocation_dof_descriptor);
+
+    rcl_interfaces::msg::ParameterDescriptor threshold_descriptor;
+    threshold_descriptor.description =
+        "Non-negative allocation-feedback threshold in the corresponding wrench unit.";
+    threshold_descriptor.read_only = true;
+    rcl_interfaces::msg::FloatingPointRange non_negative_range;
+    non_negative_range.from_value = 0.0;
+    non_negative_range.to_value = std::numeric_limits<double>::max();
+    non_negative_range.step = 0.0;
+    threshold_descriptor.floating_point_range = {non_negative_range};
+    const double allocation_priority_request_threshold = declare_parameter(
+        "allocation_priority_request_threshold", 0.0, threshold_descriptor);
+    const double allocation_residual_activation_threshold = declare_parameter(
+        "allocation_residual_activation_threshold", 1.0, threshold_descriptor);
+    const double allocation_residual_deactivation_threshold = declare_parameter(
+        "allocation_residual_deactivation_threshold", 0.5, threshold_descriptor);
+    std::visit([active_dofs](auto& controller) {
+        using Controller = std::decay_t<decltype(controller)>;
+        if constexpr (!std::is_same_v<Controller, std::monostate>)
+        {
+            controller.set_active_dofs(active_dofs);
+        }
+    }, controller_);
+
+    if (allocation_priority_dof_name.empty()
+        != allocation_suppressed_dof_name.empty())
+    {
+        throw std::runtime_error(
+            "allocation_priority_dof and allocation_suppressed_dof must be configured together.");
+    }
+    if (!allocation_priority_dof_name.empty())
+    {
+        const DOF priority_dof = get_dof_by_name(allocation_priority_dof_name);
+        const DOF suppressed_dof = get_dof_by_name(
+            allocation_suppressed_dof_name);
+        if (priority_dof == NO_DOF || suppressed_dof == NO_DOF)
+        {
+            throw std::runtime_error(
+                "Allocation suppression DOFs must use supported DOF names.");
+        }
+        std::visit([priority_dof, suppressed_dof,
+                    allocation_priority_request_threshold,
+                    allocation_residual_activation_threshold,
+                    allocation_residual_deactivation_threshold](auto& controller) {
+            using Controller = std::decay_t<decltype(controller)>;
+            if constexpr (!std::is_same_v<Controller, std::monostate>)
+            {
+                controller.set_allocation_suppression(priority_dof,
+                    suppressed_dof, allocation_priority_request_threshold,
+                    allocation_residual_activation_threshold,
+                    allocation_residual_deactivation_threshold);
+            }
+        }, controller_);
+        RPP_LOG_INFO(*logger_,
+            "Allocation feedback priority enabled: %s suppresses %s.",
+            allocation_priority_dof_name.c_str(),
+            allocation_suppressed_dof_name.c_str());
     }
 
     std::visit([](auto& controller) {
@@ -146,7 +221,7 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
 
     status_pub_ = create_publisher<ControlStatus>("control_status", 1);
     state_pub_ = create_publisher<ControlState>("control_state", 1);
-    pwm_out_pub_ = create_publisher<Float32MultiArray>("pwm_out", 1);
+    cmd_out_pub_ = create_publisher<Float64MultiArray>("cmd_out", 1);
 
     request_control_svc_ = create_service<RequestControl>(
         "request_control",
@@ -170,16 +245,16 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
 
     if (expose_developer_topics)
     {
-        pose_ref_sub_dev_ = create_subscription<PoseStamped>(
-            "pose_ref", 1,
+        pose_ref_sub_dev_ = create_subscription<Pose>(
+            "cmd_pos", 1,
             std::bind(&MotionControllerRos::on_external_pose_dev_, this, _1));
 
-        twist_ref_sub_dev_ = create_subscription<TwistStamped>(
-            "twist_ref", 1,
+        twist_ref_sub_dev_ = create_subscription<Twist>(
+            "cmd_vel", 1,
             std::bind(&MotionControllerRos::on_external_twist_dev_, this, _1));
 
-        wrench_ref_sub_dev_ = create_subscription<WrenchStamped>(
-            "wrench_ref", 1,
+        wrench_ref_sub_dev_ = create_subscription<Wrench>(
+            "cmd_tau", 1,
             std::bind(&MotionControllerRos::on_external_wrench_dev_, this, _1));
     }
 
@@ -228,6 +303,11 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
         std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::duration<double>(control_period)),
         std::bind(&MotionControllerRos::on_control_timer_, this));
+    RPP_LOG_DEBUG(*logger_,
+        "Controller configured type=%s active_dofs=0x%x developer_topics=%d "
+        "control_period=%.3f max_control_dt=%.3f.",
+        type.c_str(), static_cast<unsigned int>(active_dofs),
+        expose_developer_topics, control_period, max_control_dt_);
 }
 
 
@@ -255,6 +335,9 @@ void MotionControllerRos::on_control_timer_()
     }
     else
     {
+        RPP_LOG_WARN_THROTTLE(*logger_, std::chrono::seconds(1),
+            "Control timer dt=%.6f is outside the valid range (0, %.6f]. "
+            "Stopping controller.", dt, max_control_dt_);
         std::visit([](auto& controller) {
             using Controller = std::decay_t<decltype(controller)>;
             if constexpr (!std::is_same_v<Controller, std::monostate>)
@@ -342,34 +425,40 @@ void MotionControllerRos::publish_control_result_(
                 wrench_internal{};
             for (size_t i = 0; i < wrench_internal.size(); ++i)
             {
-                wrench_internal[i] = state.wrench_selection[i] == SIGNAL_INT;
+                wrench_internal[i] = state.wrench_selection[i] == SIGNAL_INT
+                    && !state.allocation_suppressed[i];
             }
             copy_spatial_bool(control_state_message_.nu_is_integrating,
                 wrench_internal);
 
-            if (pwm_output_message_.data.size() != state.commands.size())
+            if (cmd_out_state_message_.data.size() != state.commands.size())
             {
-                pwm_output_message_.data.resize(state.commands.size());
+                cmd_out_state_message_.data.resize(state.commands.size());
+                cmd_out_message_.data.resize(state.commands.size());
             }
             if (control_active)
             {
                 std::copy(state.commands.begin(), state.commands.end(),
-                    pwm_output_message_.data.begin());
+                    cmd_out_state_message_.data.begin());
+                std::copy(state.commands.begin(), state.commands.end(),
+                    cmd_out_message_.data.begin());
             }
             else
             {
-                std::fill(pwm_output_message_.data.begin(),
-                    pwm_output_message_.data.end(), 0.0F);
+                std::fill(cmd_out_state_message_.data.begin(),
+                    cmd_out_state_message_.data.end(), 0.0F);
+                std::fill(cmd_out_message_.data.begin(),
+                    cmd_out_message_.data.end(), 0.0);
             }
         }
     }, controller_);
 
-    control_state_message_.pwm_out = pwm_output_message_;
+    control_state_message_.cmd_out = cmd_out_state_message_;
     control_status_message_.header.stamp = control_state_message_.header.stamp;
     control_status_message_.name = "motion_controller";
     control_status_message_.status = control_active ? "ACTIVE" : "SAFE_STOP";
     state_pub_->publish(control_state_message_);
-    pwm_out_pub_->publish(pwm_output_message_);
+    cmd_out_pub_->publish(cmd_out_message_);
     status_pub_->publish(control_status_message_);
 }
 
@@ -429,7 +518,7 @@ void MotionControllerRos::on_external_pose_(
     if (!check_ref_identity_token(msg->identity_token,
         ReferenceType::POSE_REF, msg->mask))
     {
-        RCLCPP_WARN(this->get_logger(),
+        RPP_LOG_WARN(*logger_,
             "Invalid identity token for external pose reference.");
         return;
     }
@@ -448,6 +537,11 @@ void MotionControllerRos::on_external_pose_(
         static_cast<FP_TYPE>(euler_z)
     };
     const auto& mask_3d = msg->mask;
+    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
+        "Received external pose reference position=[%.3f, %.3f, %.3f] "
+        "orientation=[%.3f, %.3f, %.3f].",
+        data_3d[0], data_3d[1], data_3d[2],
+        data_3d[3], data_3d[4], data_3d[5]);
 
     dispatch_3d_with_data(data_3d, mask_3d,
         [](auto& controller, const auto& d, const auto& m) {
@@ -462,7 +556,7 @@ void MotionControllerRos::on_external_twist_(
     if (!check_ref_identity_token(msg->identity_token,
         ReferenceType::TWIST_REF, msg->mask))
     {
-        RCLCPP_WARN(this->get_logger(),
+        RPP_LOG_WARN(*logger_,
             "Invalid identity token for external twist reference.");
         return;
     }
@@ -476,6 +570,11 @@ void MotionControllerRos::on_external_twist_(
         static_cast<FP_TYPE>(msg->reference.angular.z)
     };
     const auto& mask_3d = msg->mask;
+    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
+        "Received external twist reference linear=[%.3f, %.3f, %.3f] "
+        "angular=[%.3f, %.3f, %.3f].",
+        data_3d[0], data_3d[1], data_3d[2],
+        data_3d[3], data_3d[4], data_3d[5]);
 
     dispatch_3d_with_data(data_3d, mask_3d,
         [](auto& controller, const auto& d, const auto& m) {
@@ -489,7 +588,7 @@ void MotionControllerRos::on_external_wrench_(
     if (!check_ref_identity_token(msg->identity_token,
         ReferenceType::WRENCH_REF, msg->mask))
     {
-        RCLCPP_WARN(this->get_logger(),
+        RPP_LOG_WARN(*logger_,
             "Invalid identity token for external wrench reference.");
         return;
     }
@@ -502,6 +601,11 @@ void MotionControllerRos::on_external_wrench_(
         static_cast<FP_TYPE>(msg->reference.torque.z)
     };
     const auto& mask_3d = msg->mask;
+    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
+        "Received external wrench reference force=[%.3f, %.3f, %.3f] "
+        "torque=[%.3f, %.3f, %.3f].",
+        data_3d[0], data_3d[1], data_3d[2],
+        data_3d[3], data_3d[4], data_3d[5]);
 
     dispatch_3d_with_data(data_3d, mask_3d,
         [](auto& controller, const auto& d, const auto& m) {
@@ -514,6 +618,14 @@ void MotionControllerRos::on_external_wrench_(
 void MotionControllerRos::on_navigation_status_(
     NavigationStatus::SharedPtr msg)
 {
+    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
+        "Received navigation feedback position=[%.3f, %.3f, %.3f] "
+        "linear_velocity=[%.3f, %.3f, %.3f] angular_velocity=[%.3f, %.3f, %.3f].",
+        msg->pose.pose.position.x, msg->pose.pose.position.y,
+        msg->pose.pose.position.z, msg->twist.twist.linear.x,
+        msg->twist.twist.linear.y, msg->twist.twist.linear.z,
+        msg->twist.twist.angular.x, msg->twist.twist.angular.y,
+        msg->twist.twist.angular.z);
     std::visit([&](auto& controller) {
         if constexpr (is_2d_controller<decltype(controller)>())
         {
@@ -564,17 +676,17 @@ void MotionControllerRos::on_navigation_status_(
 
 
 void MotionControllerRos::on_external_pose_dev_(
-    PoseStamped::SharedPtr msg)
+    Pose::SharedPtr msg)
 {
     double euler_x, euler_y, euler_z;
     std::tie(euler_x, euler_y, euler_z) = quat2euler(
-        msg->pose.orientation.x, msg->pose.orientation.y,
-        msg->pose.orientation.z, msg->pose.orientation.w);
+        msg->orientation.x, msg->orientation.y,
+        msg->orientation.z, msg->orientation.w);
 
     std::array<FP_TYPE, 6> data_3d{
-        static_cast<FP_TYPE>(msg->pose.position.x),
-        static_cast<FP_TYPE>(msg->pose.position.y),
-        static_cast<FP_TYPE>(msg->pose.position.z),
+        static_cast<FP_TYPE>(msg->position.x),
+        static_cast<FP_TYPE>(msg->position.y),
+        static_cast<FP_TYPE>(msg->position.z),
         static_cast<FP_TYPE>(euler_x),
         static_cast<FP_TYPE>(euler_y),
         static_cast<FP_TYPE>(euler_z)
@@ -583,6 +695,11 @@ void MotionControllerRos::on_external_pose_dev_(
     const auto& mask_3d = std::array<bool, 6>{
         true, true, true, true, true, true
     };
+    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
+        "Received cmd_pos position=[%.3f, %.3f, %.3f] "
+        "orientation=[%.3f, %.3f, %.3f].",
+        data_3d[0], data_3d[1], data_3d[2],
+        data_3d[3], data_3d[4], data_3d[5]);
 
     dispatch_3d_with_data(data_3d, mask_3d,
         [](auto& controller, const auto& d, const auto& m) {
@@ -607,19 +724,24 @@ void MotionControllerRos::on_external_pose_dev_(
 
 
 void MotionControllerRos::on_external_twist_dev_(
-    TwistStamped::SharedPtr msg)
+    Twist::SharedPtr msg)
 {
     std::array<FP_TYPE, 6> data_3d{
-        static_cast<FP_TYPE>(msg->twist.linear.x),
-        static_cast<FP_TYPE>(msg->twist.linear.y),
-        static_cast<FP_TYPE>(msg->twist.linear.z),
-        static_cast<FP_TYPE>(msg->twist.angular.x),
-        static_cast<FP_TYPE>(msg->twist.angular.y),
-        static_cast<FP_TYPE>(msg->twist.angular.z)
+        static_cast<FP_TYPE>(msg->linear.x),
+        static_cast<FP_TYPE>(msg->linear.y),
+        static_cast<FP_TYPE>(msg->linear.z),
+        static_cast<FP_TYPE>(msg->angular.x),
+        static_cast<FP_TYPE>(msg->angular.y),
+        static_cast<FP_TYPE>(msg->angular.z)
     };
     const auto& mask_3d = std::array<bool, 6>{
         true, true, true, true, true, true
     };
+    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
+        "Received cmd_vel linear=[%.3f, %.3f, %.3f] "
+        "angular=[%.3f, %.3f, %.3f].",
+        data_3d[0], data_3d[1], data_3d[2],
+        data_3d[3], data_3d[4], data_3d[5]);
 
     dispatch_3d_with_data(data_3d, mask_3d,
         [](auto& controller, const auto& d, const auto& m) {
@@ -643,19 +765,24 @@ void MotionControllerRos::on_external_twist_dev_(
 }
 
 void MotionControllerRos::on_external_wrench_dev_(
-    WrenchStamped::SharedPtr msg)
+    Wrench::SharedPtr msg)
 {
     std::array<FP_TYPE, 6> data_3d{
-        static_cast<FP_TYPE>(msg->wrench.force.x),
-        static_cast<FP_TYPE>(msg->wrench.force.y),
-        static_cast<FP_TYPE>(msg->wrench.force.z),
-        static_cast<FP_TYPE>(msg->wrench.torque.x),
-        static_cast<FP_TYPE>(msg->wrench.torque.y),
-        static_cast<FP_TYPE>(msg->wrench.torque.z)
+        static_cast<FP_TYPE>(msg->force.x),
+        static_cast<FP_TYPE>(msg->force.y),
+        static_cast<FP_TYPE>(msg->force.z),
+        static_cast<FP_TYPE>(msg->torque.x),
+        static_cast<FP_TYPE>(msg->torque.y),
+        static_cast<FP_TYPE>(msg->torque.z)
     };
     const auto& mask_3d = std::array<bool, 6>{
         true, true, true, true, true, true
     };
+    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
+        "Received cmd_tau force=[%.3f, %.3f, %.3f] "
+        "torque=[%.3f, %.3f, %.3f].",
+        data_3d[0], data_3d[1], data_3d[2],
+        data_3d[3], data_3d[4], data_3d[5]);
 
     dispatch_3d_with_data(data_3d, mask_3d,
         [](auto& controller, const auto& d, const auto& m) {
@@ -692,17 +819,18 @@ void MotionControllerRos::select_signal_(
                 || !to_signal_status(request->twist_selection[i],
                     twist_selection[i]))
             {
-                RCLCPP_WARN(this->get_logger(),
+                RPP_LOG_WARN(*logger_,
                     "Invalid signal selection value.");
                 return;
             }
         }
         set_wrench_selection_(wrench_selection);
         set_twist_selection_(twist_selection);
+        RPP_LOG_DEBUG(*logger_, "Signal selection updated.");
     }
     else
     {
-        RCLCPP_WARN(this->get_logger(),
+        RPP_LOG_WARN(*logger_,
             "Invalid identity token for select_signal service.");
     }
 }
@@ -744,6 +872,8 @@ void MotionControllerRos::request_external_ref_(
         response->identity_token = "";
         response->message = "External reference denied.";
     }
+    RPP_LOG_DEBUG(*logger_, "External reference request %s.",
+        success ? "granted" : "denied");
 }
 
 void MotionControllerRos::release_control_(
@@ -762,6 +892,8 @@ void MotionControllerRos::release_control_(
     response->message = success
         ? "Control authority released."
         : "Control authority release denied.";
+    RPP_LOG_DEBUG(*logger_, "Control authority release %s.",
+        success ? "granted" : "denied");
 }
 
 void MotionControllerRos::release_external_ref_(
@@ -780,6 +912,8 @@ void MotionControllerRos::release_external_ref_(
     response->message = success
         ? "External reference authority released."
         : "External reference authority release denied.";
+    RPP_LOG_DEBUG(*logger_, "External reference authority release %s.",
+        success ? "granted" : "denied");
 }
 
 void MotionControllerRos::request_control_(
@@ -807,7 +941,8 @@ void MotionControllerRos::request_control_(
         response->identity_token = "";
         response->message = "Control denied.";
     }
+    RPP_LOG_DEBUG(*logger_, "Control authority request %s.",
+        success ? "granted" : "denied");
 }
 
 }
-

@@ -67,7 +67,8 @@ struct ControllerIOStateT
       wrench{},
       commands{},
       twist_selection{},
-      wrench_selection{}
+      wrench_selection{},
+      allocation_suppressed{}
   {}
 
   bool has_any_pose_ext;
@@ -89,6 +90,7 @@ struct ControllerIOStateT
   std::vector<FP_TYPE> commands;
   std::array<SignalStatus, Dim> twist_selection;
   std::array<SignalStatus, Dim> wrench_selection;
+  std::array<bool, Dim> allocation_suppressed;
 };
 
 /**
