@@ -22,7 +22,6 @@ public:
         ParameterDescription::create<double>("max_angle", 0.61),
         ParameterDescription::create<double>("mass", 450.0),
         ParameterDescription::create<double>("z_cg", 0.4),
-        ParameterDescription::create<double>("filter_time_constant", 0.4),
         ParameterDescription::create<double>("metacentric_height", 0.3),
         ParameterDescription::create<double>("max_safe_roll_deg", 30.0)
     )
@@ -38,7 +37,6 @@ public:
         metacentric_height_ = context.get_parameter<double>("metacentric_height");
         max_safe_roll_rad_ = context.get_parameter<double>("max_safe_roll_deg")
             * kPi / 180.0;
-        filter_time_constant_ = context.get_parameter<double>("filter_time_constant");
         validate_configuration();
     }
 
@@ -154,8 +152,7 @@ private:
             || !is_finite(max_thrust_) || !is_finite(max_angle_)
             || !is_finite(mass_) || !is_finite(z_cg_)
             || !is_finite(metacentric_height_)
-            || !is_finite(max_safe_roll_rad_)
-            || !is_finite(filter_time_constant_))
+            || !is_finite(max_safe_roll_rad_))
         {
             throw std::invalid_argument(
                 "Waterjet allocator parameters must be finite.");
@@ -163,8 +160,7 @@ private:
         if (max_thrust_ <= 0.0 || max_angle_ <= 0.0
             || max_angle_ > kPi / 2.0 || mass_ <= 0.0 || z_cg_ <= 0.0
             || metacentric_height_ <= 0.0 || max_safe_roll_rad_ < 0.0
-            || max_safe_roll_rad_ >= kPi / 2.0
-            || filter_time_constant_ <= 0.0)
+            || max_safe_roll_rad_ >= kPi / 2.0)
         {
             throw std::invalid_argument(
                 "Waterjet allocator parameters are outside safe limits.");
@@ -173,5 +169,4 @@ private:
 
     double jet_x_, jet_y_, max_thrust_, max_angle_;
     double mass_, z_cg_, metacentric_height_, max_safe_roll_rad_;
-    double filter_time_constant_;
 };

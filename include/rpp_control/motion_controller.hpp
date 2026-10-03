@@ -4,10 +4,12 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include <rpp_cpp/plugin.hpp>
 #include <rpp_plugin_types/rpp_control/MotionController2D.hpp>
@@ -43,14 +45,18 @@ namespace rpp_control {
             using PoseArray = std::array<FP_TYPE, Dim::value>;
             using TwistArray = std::array<FP_TYPE, Dim::value>;
             using WrenchArray = std::array<FP_TYPE, Dim::value>;
+            static constexpr size_t debug_snapshot_buffer_size = 1024;
+            using DebugSnapshotBuffer = std::array<char,
+                debug_snapshot_buffer_size>;
 
             struct AllocationSuppression
             {
                 DOF priority_dof = NO_DOF;
                 DOF suppressed_dof = NO_DOF;
                 double priority_request_threshold = 0.0;
-                double residual_activation_threshold = 0.0;
-                double residual_deactivation_threshold = 0.0;
+                double priority_dof_reference_wrench = 1.0;
+                double residual_activation_percent = 100.0;
+                double residual_deactivation_percent = 50.0;
                 bool active = false;
                 WrenchArray previous_requested_wrench{};
             };
@@ -166,7 +172,6 @@ namespace rpp_control {
                         twist_reference[i] = 0.0;
                     }
                 }
-
                 Traits::make_input_message(
                     state_locked_.pose_ref, twist_reference, ref_state_msg_
                 );
@@ -189,9 +194,12 @@ namespace rpp_control {
                         ref_state_msg_.as_const(),
                         curr_state_msg_.as_const(),
                         enabler_odom_msg_.as_const(), dt);
-                    auto requested_wrench = Traits::merge_wrench_reference(
+                    auto merged_wrench = Traits::merge_wrench_reference(
                         std::move(controller_command), state_locked_.wrench_ref,
                         state_locked_.wrench_selection);
+                    auto requested_wrench = limit_requested_wrench(
+                        std::move(merged_wrench), control_dofs,
+                        state_locked_.wrench_selection, dt);
                     if (!Traits::is_finite_wrench(requested_wrench))
                     {
                         return stop_with_warning(
@@ -227,18 +235,6 @@ namespace rpp_control {
                         allocation_suppression_.previous_requested_wrench =
                             state_live_.wrench_ref;
                     }
-                    RPP_LOG_DEBUG_THROTTLE(*logger_,
-                        std::chrono::milliseconds(500),
-                        "Control step completed time=%.3f dt=%.3f "
-                        "control_dofs=0x%x allocation_dofs=0x%x "
-                        "feedback=%d pose_ref=%d twist_ref=%d wrench_ref=%d.",
-                        curr_time_sec, dt,
-                        static_cast<unsigned int>(control_dofs),
-                        static_cast<unsigned int>(allocation_dofs),
-                        state_locked_.has_feedback,
-                        state_locked_.has_any_pose_ext,
-                        state_locked_.has_any_twist_ext,
-                        state_locked_.has_any_wrench_ext);
                 }
                 catch (const std::exception& exception)
                 {
@@ -317,6 +313,11 @@ namespace rpp_control {
                 state = state_live_;
             }
 
+            DebugSnapshotBuffer& get_debug_snapshot_buffer()
+            {
+                return debug_snapshot_buffer_;
+            }
+
             void get_active_dofs(DOF& active_dofs)
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -344,7 +345,8 @@ namespace rpp_control {
                     || (active_dofs_ & allocation_suppression_.suppressed_dof)
                         == NO_DOF)
                 {
-                    allocation_suppression_.active = false;
+                    set_allocation_suppression_active_locked(false,
+                        "configured DOF is inactive", 0.0, 0.0, 0.0);
                 }
                 for (size_t i = 0; i < Dim::value; ++i)
                 {
@@ -367,8 +369,9 @@ namespace rpp_control {
             void set_allocation_suppression(
                 const DOF priority_dof, const DOF suppressed_dof,
                 const double priority_request_threshold,
-                const double residual_activation_threshold,
-                const double residual_deactivation_threshold)
+                const double priority_dof_reference_wrench,
+                const double residual_activation_percent,
+                const double residual_deactivation_percent)
             {
                 if (!is_single_supported_dof(priority_dof)
                     || !is_single_supported_dof(suppressed_dof)
@@ -378,14 +381,19 @@ namespace rpp_control {
                         "Allocation priority and suppressed DOFs must be distinct supported axes.");
                 }
                 if (!std::isfinite(priority_request_threshold)
-                    || !std::isfinite(residual_activation_threshold)
-                    || !std::isfinite(residual_deactivation_threshold)
+                    || !std::isfinite(priority_dof_reference_wrench)
+                    || !std::isfinite(residual_activation_percent)
+                    || !std::isfinite(residual_deactivation_percent)
                     || priority_request_threshold < 0.0
-                    || residual_deactivation_threshold < 0.0
-                    || residual_activation_threshold <= residual_deactivation_threshold)
+                    || priority_dof_reference_wrench <= 0.0
+                    || residual_activation_percent < 0.0
+                    || residual_deactivation_percent < 0.0
+                    || residual_activation_percent > 100.0
+                    || residual_deactivation_percent > 100.0
+                    || residual_activation_percent <= residual_deactivation_percent)
                 {
                     throw std::invalid_argument(
-                        "Allocation suppression thresholds must be finite, non-negative, and have activation greater than deactivation.");
+                        "Allocation suppression reference wrench must be finite and positive; residual percentages must be in [0, 100] with activation greater than deactivation.");
                 }
 
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -395,24 +403,55 @@ namespace rpp_control {
                     throw std::invalid_argument(
                         "Allocation suppression DOFs must be active for this controller.");
                 }
+                set_allocation_suppression_active_locked(false,
+                    "configuration updated", 0.0, 0.0, 0.0);
                 allocation_suppression_.priority_dof = priority_dof;
                 allocation_suppression_.suppressed_dof = suppressed_dof;
                 allocation_suppression_.priority_request_threshold =
                     priority_request_threshold;
-                allocation_suppression_.residual_activation_threshold =
-                    residual_activation_threshold;
-                allocation_suppression_.residual_deactivation_threshold =
-                    residual_deactivation_threshold;
-                allocation_suppression_.active = false;
+                allocation_suppression_.priority_dof_reference_wrench =
+                    priority_dof_reference_wrench;
+                allocation_suppression_.residual_activation_percent =
+                    residual_activation_percent;
+                allocation_suppression_.residual_deactivation_percent =
+                    residual_deactivation_percent;
                 RPP_LOG_DEBUG(*logger_,
                     "Allocation suppression configured priority_dof=0x%x "
                     "suppressed_dof=0x%x request_threshold=%.3f "
-                    "activation_threshold=%.3f deactivation_threshold=%.3f.",
+                    "reference_wrench=%.3f activation=%.3f%% deactivation=%.3f%%.",
                     static_cast<unsigned int>(priority_dof),
                     static_cast<unsigned int>(suppressed_dof),
                     priority_request_threshold,
-                    residual_activation_threshold,
-                    residual_deactivation_threshold);
+                    priority_dof_reference_wrench,
+                    residual_activation_percent,
+                    residual_deactivation_percent);
+            }
+
+            void set_wrench_rate_limits(
+                const std::vector<double>& wrench_rate_limits)
+            {
+                if (wrench_rate_limits.size() != Dim::value)
+                {
+                    throw std::invalid_argument(
+                        "Wrench rate limits must contain one value per controller DOF.");
+                }
+
+                WrenchArray limits{};
+                for (size_t index = 0; index < Dim::value; ++index)
+                {
+                    const double value = wrench_rate_limits[index];
+                    if (!std::isfinite(value) || value < 0.0
+                        || value > std::numeric_limits<FP_TYPE>::max())
+                    {
+                        throw std::invalid_argument(
+                            "Wrench rate limits must be finite and non-negative.");
+                    }
+                    limits[index] = static_cast<FP_TYPE>(value);
+                }
+
+                std::lock_guard<std::mutex> lock(mutex_);
+                wrench_rate_limits_ = limits;
+                reset_wrench_limiter_locked();
             }
 
             void set_feedback(const PoseArray& pose, const TwistArray& twist)
@@ -712,8 +751,61 @@ namespace rpp_control {
                 std::fill(state_live_.commands.begin(),
                     state_live_.commands.end(), 0.0);
                 state_live_.allocation_suppressed.fill(false);
-                allocation_suppression_.active = false;
+                set_allocation_suppression_active_locked(false,
+                    "controller outputs cleared", 0.0, 0.0, 0.0);
                 allocation_suppression_.previous_requested_wrench.fill(0.0);
+                reset_wrench_limiter_locked();
+            }
+
+            void reset_wrench_limiter_locked()
+            {
+                limited_wrench_.fill(0.0);
+                limited_wrench_initialized_.fill(false);
+            }
+
+            typename OutputMessage::Const limit_requested_wrench(
+                typename OutputMessage::Const requested_wrench,
+                const DOF control_dofs,
+                const std::array<SignalStatus, Dim::value>& selection,
+                const double dt)
+            {
+                WrenchArray wrench = Traits::wrench_values(requested_wrench);
+                std::lock_guard<std::mutex> lock(mutex_);
+                for (size_t index = 0; index < Dim::value; ++index)
+                {
+                    const DOF dof = get_dof_by_index<Dim::value>(index);
+                    const bool allocation_suppressed =
+                        (control_dofs & dof) == NO_DOF
+                        && selection[index] != SIGNAL_EXT;
+                    if (allocation_suppressed)
+                    {
+                        limited_wrench_[index] = wrench[index];
+                        limited_wrench_initialized_[index] = true;
+                        continue;
+                    }
+
+                    const FP_TYPE wrench_rate_limit = wrench_rate_limits_[index];
+                    if (wrench_rate_limit == 0.0F)
+                    {
+                        limited_wrench_[index] = wrench[index];
+                        limited_wrench_initialized_[index] = true;
+                        continue;
+                    }
+
+                    if (!limited_wrench_initialized_[index])
+                    {
+                        limited_wrench_initialized_[index] = true;
+                    }
+
+                    const FP_TYPE maximum_delta = wrench_rate_limit
+                        * static_cast<FP_TYPE>(dt);
+                    const FP_TYPE delta = std::clamp(
+                        wrench[index] - limited_wrench_[index],
+                        -maximum_delta, maximum_delta);
+                    limited_wrench_[index] += delta;
+                    wrench[index] = limited_wrench_[index];
+                }
+                return Traits::make_wrench(wrench);
             }
 
             static bool is_single_supported_dof(const DOF dof)
@@ -737,6 +829,32 @@ namespace rpp_control {
                 return Dim::value;
             }
 
+            void set_allocation_suppression_active_locked(
+                const bool active, const char* const reason,
+                const FP_TYPE priority_request,
+                const double priority_residual_percent,
+                const double threshold_percent)
+            {
+                if (allocation_suppression_.active == active)
+                {
+                    return;
+                }
+
+                allocation_suppression_.active = active;
+                RPP_LOG_DEBUG(*logger_,
+                    "Allocation suppression %s (%s): priority_dof=0x%x "
+                    "request=%.3f residual=%.3f%% suppressed_dof=0x%x "
+                    "threshold=%.3f%%.",
+                    active ? "enabled" : "disabled", reason,
+                    static_cast<unsigned int>(
+                        allocation_suppression_.priority_dof),
+                    static_cast<double>(priority_request),
+                    priority_residual_percent,
+                    static_cast<unsigned int>(
+                        allocation_suppression_.suppressed_dof),
+                    threshold_percent);
+            }
+
             DOF update_allocation_suppression_locked(
                 typename ControllerIO::State& state)
             {
@@ -748,7 +866,9 @@ namespace rpp_control {
                     || (active_dofs_ & allocation_suppression_.suppressed_dof)
                         == NO_DOF)
                 {
-                    allocation_suppression_.active = false;
+                    set_allocation_suppression_active_locked(false,
+                        "suppression is not configured for active DOFs",
+                        0.0, 0.0, 0.0);
                     return active_dofs_;
                 }
 
@@ -758,47 +878,52 @@ namespace rpp_control {
                     allocation_suppression_.suppressed_dof);
                 if (priority_index == Dim::value || suppressed_index == Dim::value)
                 {
-                    allocation_suppression_.active = false;
+                    set_allocation_suppression_active_locked(false,
+                        "configured DOF is unavailable", 0.0, 0.0, 0.0);
                     return active_dofs_;
                 }
 
                 const FP_TYPE priority_request =
                     allocation_suppression_.previous_requested_wrench[
                         priority_index];
-                const FP_TYPE suppressed_residual = std::abs(
+                const FP_TYPE priority_residual = std::abs(
                     allocation_suppression_.previous_requested_wrench[
-                        suppressed_index]
-                    - state.wrench[suppressed_index]);
+                        priority_index]
+                    - state.wrench[priority_index]);
                 if (!std::isfinite(priority_request)
-                    || !std::isfinite(suppressed_residual))
+                    || !std::isfinite(priority_residual))
                 {
-                    allocation_suppression_.active = false;
+                    set_allocation_suppression_active_locked(false,
+                        "allocation feedback is not finite", priority_request,
+                        priority_residual, 0.0);
+                    return active_dofs_;
+                }
+
+                const double priority_residual_percent = 100.0
+                    * static_cast<double>(priority_residual)
+                    / allocation_suppression_.priority_dof_reference_wrench;
+                if (!std::isfinite(priority_residual_percent))
+                {
+                    set_allocation_suppression_active_locked(false,
+                        "allocation residual percentage is not finite",
+                        priority_request, 0.0, 0.0);
                     return active_dofs_;
                 }
 
                 const bool priority_requested = std::abs(priority_request)
                     > allocation_suppression_.priority_request_threshold;
-                const bool was_active = allocation_suppression_.active;
                 const double threshold = allocation_suppression_.active
-                    ? allocation_suppression_.residual_deactivation_threshold
-                    : allocation_suppression_.residual_activation_threshold;
-                allocation_suppression_.active = priority_requested
-                    && suppressed_residual >= threshold;
-                if (allocation_suppression_.active != was_active)
-                {
-                    RPP_LOG_DEBUG(*logger_,
-                        "Allocation suppression %s priority_dof=0x%x "
-                        "request=%.3f suppressed_dof=0x%x residual=%.3f "
-                        "threshold=%.3f.",
-                        allocation_suppression_.active ? "enabled" : "disabled",
-                        static_cast<unsigned int>(
-                            allocation_suppression_.priority_dof),
-                        static_cast<double>(priority_request),
-                        static_cast<unsigned int>(
-                            allocation_suppression_.suppressed_dof),
-                        static_cast<double>(suppressed_residual),
-                        threshold);
-                }
+                    ? allocation_suppression_.residual_deactivation_percent
+                    : allocation_suppression_.residual_activation_percent;
+                const bool suppress = priority_requested
+                    && priority_residual_percent >= threshold;
+                const char* const reason = suppress
+                    ? "allocation residual requires priority"
+                    : priority_requested
+                    ? "allocation residual recovered"
+                    : "priority request is below threshold";
+                set_allocation_suppression_active_locked(suppress, reason,
+                    priority_request, priority_residual_percent, threshold);
                 if (!allocation_suppression_.active)
                 {
                     return active_dofs_;
@@ -916,11 +1041,15 @@ namespace rpp_control {
             double feedback_timeout_;
             double feedback_time_;
             AllocationSuppression allocation_suppression_;
+            WrenchArray wrench_rate_limits_{};
+            WrenchArray limited_wrench_{};
+            std::array<bool, Dim::value> limited_wrench_initialized_{};
             std::mutex step_mutex_;
             mutable std::mutex mutex_;
             typename ControllerIO::State state_live_;
             typename ControllerIO::State state_locked_;
             typename ControllerIO::Error errors_;
+            DebugSnapshotBuffer debug_snapshot_buffer_{};
 
             std::shared_ptr<ControllerComponent> controller_;
             std::shared_ptr<AllocatorComponent> allocator_;

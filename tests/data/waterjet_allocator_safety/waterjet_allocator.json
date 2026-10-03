@@ -1,0 +1,20 @@
+{
+  "ScriptPath": "include/rpp_control/motion_controller2d.hpp",
+  "Language": "cpp",
+  "Configurations": {
+    "Jetski": {
+      "Components": {
+        "allocator": [
+          {
+            "Id": "3de6d1a8-f008-4a57-8849-69567b88fa51",
+            "PluginName": "rpp_control::WaterjetAllocator"
+          }
+        ]
+      }
+    }
+  },
+  "ActiveConfiguration": "Jetski",
+  "Spec": {
+    "allocator": "rpp_control::MotionControllerAllocator2D"
+  }
+}

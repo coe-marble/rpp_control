@@ -1,0 +1,10 @@
+{
+  "Id": "3de6d1a8-f008-4a57-8849-69567b88fa51",
+  "Name": "WaterjetAllocator_comp",
+  "PluginType": "rpp_control::MotionControllerAllocator2D",
+  "PluginName": "rpp_control::WaterjetAllocator",
+  "Library": "rpp_control",
+  "SubcomponentSpec": {},
+  "Subcomponents": {},
+  "ParentComponentInfo": null
+}

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.15)
 project(rpp_control)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
@@ -76,6 +76,13 @@ if(BUILD_TESTING)
   target_link_libraries(test_motion_controller
     rpp_control
   )
+
+  ament_add_gtest(
+    test_waterjet_allocator_safety
+    tests/waterjet_allocator_safety_tests.cpp)
+  target_include_directories(test_waterjet_allocator_safety PRIVATE include)
+  target_link_libraries(test_waterjet_allocator_safety rpp_control)
+
   # copy test data to build directory
   add_custom_target(copy_test_directory ALL
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -84,6 +91,7 @@ if(BUILD_TESTING)
     )
 
   add_dependencies(test_motion_controller copy_test_directory)
+  add_dependencies(test_waterjet_allocator_safety copy_test_directory)
 
 
   # the following line skips the linter which checks for copyrights

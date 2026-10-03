@@ -12,6 +12,7 @@
 #include <std_msgs/msg/int32_multi_array.hpp>
 #include <std_msgs/msg/float32_multi_array.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
+#include <std_msgs/msg/string.hpp>
 #include <marble_control_msgs/msg/control_state.hpp>
 #include <marble_control_msgs/msg/control_status.hpp>
 #include <marble_control_msgs/msg/pose_reference.hpp>
@@ -35,6 +36,7 @@ namespace rpp_control {
   using Int32MultiArray = std_msgs::msg::Int32MultiArray;
   using Float32MultiArray = std_msgs::msg::Float32MultiArray;
   using Float64MultiArray = std_msgs::msg::Float64MultiArray;
+  using String = std_msgs::msg::String;
   using NavigationStatus = nav_msgs::msg::Odometry;
   using WrenchReference = marble_control_msgs::msg::WrenchReference;
   using TwistReference = marble_control_msgs::msg::TwistReference;

@@ -52,6 +52,22 @@ namespace rpp_control {
             return merged_wrench;
         }
 
+        static std::array<FP_TYPE, 3> wrench_values(
+            const OutputMessage::Const& wrench)
+        {
+            return {wrench.force().x(), wrench.force().y(), wrench.torque()};
+        }
+
+        static OutputMessage::Const make_wrench(
+            const std::array<FP_TYPE, 3>& values)
+        {
+            OutputMessage wrench;
+            wrench.force().x() = values[0];
+            wrench.force().y() = values[1];
+            wrench.torque() = values[2];
+            return wrench;
+        }
+
         static bool is_finite_wrench(const OutputMessage::Const& wrench)
         {
             return std::isfinite(wrench.force().x())

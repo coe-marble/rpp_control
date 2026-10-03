@@ -43,6 +43,7 @@ namespace rpp_control {
         rclcpp::Publisher<ControlStatus>::SharedPtr status_pub_;
         rclcpp::Publisher<ControlState>::SharedPtr state_pub_;
         rclcpp::Publisher<Float64MultiArray>::SharedPtr cmd_out_pub_;
+        rclcpp::Publisher<String>::SharedPtr debug_pub_;
         rclcpp::TimerBase::SharedPtr control_timer_;
 
     private:
@@ -66,6 +67,8 @@ namespace rpp_control {
 
         std::chrono::steady_clock::time_point last_control_tick_;
         double max_control_dt_ = 0.0;
+        rpp::LogThrottle debug_snapshot_throttle_;
+        String debug_message_;
         Float32MultiArray cmd_out_state_message_;
         Float64MultiArray cmd_out_message_;
         ControlState control_state_message_;

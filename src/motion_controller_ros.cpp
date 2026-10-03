@@ -7,10 +7,14 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <tuple>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -64,6 +68,70 @@ bool to_reference_type(
     }
 }
 
+template <size_t BufferSize, typename State>
+size_t format_control_snapshot(
+    std::array<char, BufferSize>& buffer, const State& state,
+    const bool control_active, const double dt)
+{
+    static_assert(BufferSize > 1);
+    int characters_written = 0;
+    if constexpr (std::tuple_size_v<std::decay_t<decltype(state.pose)>> == 3)
+    {
+        characters_written = std::snprintf(buffer.data(), buffer.size(),
+            "\n"
+            "Control state (%s, dt=%.3f s)\n"
+            "             |       x |       y |     yaw\n"
+            "feedback eta | %7.3f | %7.3f | %7.3f\n"
+            "feedback nu  | %7.3f | %7.3f | %7.3f\n"
+            "target eta   | %7.3f | %7.3f | %7.3f\n"
+            "target nu    | %7.3f | %7.3f | %7.3f\n"
+            "wrench req   | %7.3f | %7.3f | %7.3f\n"
+            "wrench real  | %7.3f | %7.3f | %7.3f\n"
+            "suppressed   | %7s | %7s | %7s",
+            control_active ? "ACTIVE" : "SAFE_STOP", dt,
+            static_cast<double>(state.pose[0]),
+            static_cast<double>(state.pose[1]),
+            static_cast<double>(state.pose[2]),
+            static_cast<double>(state.twist[0]),
+            static_cast<double>(state.twist[1]),
+            static_cast<double>(state.twist[2]),
+            static_cast<double>(state.pose_ref[0]),
+            static_cast<double>(state.pose_ref[1]),
+            static_cast<double>(state.pose_ref[2]),
+            static_cast<double>(state.twist_ref[0]),
+            static_cast<double>(state.twist_ref[1]),
+            static_cast<double>(state.twist_ref[2]),
+            static_cast<double>(state.wrench_ref[0]),
+            static_cast<double>(state.wrench_ref[1]),
+            static_cast<double>(state.wrench_ref[2]),
+            static_cast<double>(state.wrench[0]),
+            static_cast<double>(state.wrench[1]),
+            static_cast<double>(state.wrench[2]),
+            state.allocation_suppressed[0] ? "yes" : "no",
+            state.allocation_suppressed[1] ? "yes" : "no",
+            state.allocation_suppressed[2] ? "yes" : "no");
+    }
+    else
+    {
+        characters_written = std::snprintf(buffer.data(), buffer.size(),
+            "Control state (%s, dt=%.3f s) feedback and references updated.",
+            control_active ? "ACTIVE" : "SAFE_STOP", dt);
+    }
+
+    if (characters_written < 0)
+    {
+        constexpr char error_message[] =
+            "Control state snapshot formatting failed.";
+        const auto error_length = std::min(sizeof(error_message) - 1,
+            buffer.size() - 1);
+        std::copy_n(error_message, error_length, buffer.data());
+        buffer[error_length] = '\0';
+        return error_length;
+    }
+    return std::min(static_cast<size_t>(characters_written),
+        buffer.size() - 1);
+}
+
 }  // namespace
 
 namespace rpp_control {
@@ -71,7 +139,8 @@ namespace rpp_control {
 MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
     : Node("motion_controller", options),
         logger_(std::make_shared<rpp::RppLogger>(this->get_logger().get_name())),
-        controller_(std::monostate{})
+        controller_(std::monostate{}),
+        debug_snapshot_throttle_(std::chrono::milliseconds(500))
 {
     using std::placeholders::_1;
     using std::placeholders::_2;
@@ -133,26 +202,67 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
     const std::string allocation_suppressed_dof_name = declare_parameter(
         "allocation_suppressed_dof", "", allocation_dof_descriptor);
 
-    rcl_interfaces::msg::ParameterDescriptor threshold_descriptor;
-    threshold_descriptor.description =
-        "Non-negative allocation-feedback threshold in the corresponding wrench unit.";
-    threshold_descriptor.read_only = true;
+    rcl_interfaces::msg::ParameterDescriptor priority_threshold_descriptor;
+    priority_threshold_descriptor.description =
+        "Non-negative priority-DOF wrench threshold in the corresponding wrench unit.";
+    priority_threshold_descriptor.read_only = true;
     rcl_interfaces::msg::FloatingPointRange non_negative_range;
     non_negative_range.from_value = 0.0;
     non_negative_range.to_value = std::numeric_limits<double>::max();
     non_negative_range.step = 0.0;
-    threshold_descriptor.floating_point_range = {non_negative_range};
+    priority_threshold_descriptor.floating_point_range = {non_negative_range};
     const double allocation_priority_request_threshold = declare_parameter(
-        "allocation_priority_request_threshold", 0.0, threshold_descriptor);
-    const double allocation_residual_activation_threshold = declare_parameter(
-        "allocation_residual_activation_threshold", 1.0, threshold_descriptor);
-    const double allocation_residual_deactivation_threshold = declare_parameter(
-        "allocation_residual_deactivation_threshold", 0.5, threshold_descriptor);
+        "allocation_priority_request_threshold", 0.0,
+        priority_threshold_descriptor);
+
+    rcl_interfaces::msg::ParameterDescriptor reference_wrench_descriptor;
+    reference_wrench_descriptor.description =
+        "Positive nominal maximum wrench for the allocation-priority DOF.";
+    reference_wrench_descriptor.read_only = true;
+    rcl_interfaces::msg::FloatingPointRange positive_range;
+    positive_range.from_value = std::numeric_limits<double>::min();
+    positive_range.to_value = std::numeric_limits<double>::max();
+    positive_range.step = 0.0;
+    reference_wrench_descriptor.floating_point_range = {positive_range};
+    const double allocation_priority_dof_reference_wrench = declare_parameter(
+        "allocation_priority_dof_reference_wrench", 1.0,
+        reference_wrench_descriptor);
+
+    rcl_interfaces::msg::ParameterDescriptor residual_percentage_descriptor;
+    residual_percentage_descriptor.description =
+        "Priority-DOF allocation residual as a percentage of allocation_priority_dof_reference_wrench.";
+    residual_percentage_descriptor.read_only = true;
+    rcl_interfaces::msg::FloatingPointRange percentage_range;
+    percentage_range.from_value = 0.0;
+    percentage_range.to_value = 100.0;
+    percentage_range.step = 0.0;
+    residual_percentage_descriptor.floating_point_range = {percentage_range};
+    const double allocation_residual_activation_percent = declare_parameter(
+        "allocation_residual_activation_percent", 100.0,
+        residual_percentage_descriptor);
+    const double allocation_residual_deactivation_percent = declare_parameter(
+        "allocation_residual_deactivation_percent", 50.0,
+        residual_percentage_descriptor);
     std::visit([active_dofs](auto& controller) {
         using Controller = std::decay_t<decltype(controller)>;
         if constexpr (!std::is_same_v<Controller, std::monostate>)
         {
             controller.set_active_dofs(active_dofs);
+        }
+    }, controller_);
+
+    rcl_interfaces::msg::ParameterDescriptor wrench_rate_limit_descriptor;
+    wrench_rate_limit_descriptor.description =
+        "Maximum requested-wrench rate per controller DOF; zero disables an axis limit.";
+    wrench_rate_limit_descriptor.read_only = true;
+    const auto max_wrench_rate = declare_parameter<std::vector<double>>(
+        "max_wrench_rate", std::vector<double>(type == "2D" ? 3 : 6, 0.0),
+        wrench_rate_limit_descriptor);
+    std::visit([&max_wrench_rate](auto& controller) {
+        using Controller = std::decay_t<decltype(controller)>;
+        if constexpr (!std::is_same_v<Controller, std::monostate>)
+        {
+            controller.set_wrench_rate_limits(max_wrench_rate);
         }
     }, controller_);
 
@@ -174,15 +284,17 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
         }
         std::visit([priority_dof, suppressed_dof,
                     allocation_priority_request_threshold,
-                    allocation_residual_activation_threshold,
-                    allocation_residual_deactivation_threshold](auto& controller) {
+                    allocation_priority_dof_reference_wrench,
+                    allocation_residual_activation_percent,
+                    allocation_residual_deactivation_percent](auto& controller) {
             using Controller = std::decay_t<decltype(controller)>;
             if constexpr (!std::is_same_v<Controller, std::monostate>)
             {
                 controller.set_allocation_suppression(priority_dof,
                     suppressed_dof, allocation_priority_request_threshold,
-                    allocation_residual_activation_threshold,
-                    allocation_residual_deactivation_threshold);
+                    allocation_priority_dof_reference_wrench,
+                    allocation_residual_activation_percent,
+                    allocation_residual_deactivation_percent);
             }
         }, controller_);
         RPP_LOG_INFO(*logger_,
@@ -201,6 +313,12 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
 
     bool expose_developer_topics = this->declare_parameter(
         "expose_developer_topics", false);
+    rcl_interfaces::msg::ParameterDescriptor debug_descriptor;
+    debug_descriptor.description =
+        "At startup, publish throttled controller-state snapshots on the debug topic.";
+    debug_descriptor.read_only = true;
+    const bool publish_debug = this->declare_parameter(
+        "publish_debug", false, debug_descriptor);
 
 
     wrench_ext_sub_ = create_subscription<WrenchReference>(
@@ -222,6 +340,14 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
     status_pub_ = create_publisher<ControlStatus>("control_status", 1);
     state_pub_ = create_publisher<ControlState>("control_state", 1);
     cmd_out_pub_ = create_publisher<Float64MultiArray>("cmd_out", 1);
+    if (publish_debug)
+    {
+        debug_pub_ = create_publisher<String>("debug", 1);
+        debug_message_.data.reserve(
+            MotionController2DImpl::debug_snapshot_buffer_size - 1);
+        RPP_LOG_INFO(*logger_, "Publishing debug snapshots on '%s'.",
+            debug_pub_->get_topic_name());
+    }
 
     request_control_svc_ = create_service<RequestControl>(
         "request_control",
@@ -431,6 +557,23 @@ void MotionControllerRos::publish_control_result_(
             copy_spatial_bool(control_state_message_.nu_is_integrating,
                 wrench_internal);
 
+            if (debug_snapshot_throttle_.should_log())
+            {
+                auto& debug_snapshot_buffer =
+                    controller.get_debug_snapshot_buffer();
+                const auto debug_snapshot_length = format_control_snapshot(
+                    debug_snapshot_buffer, state, control_active, dt);
+                logger_->log(rpp::LogLevel::DEBUG, __FILE__, __LINE__,
+                    std::string_view(debug_snapshot_buffer.data(),
+                        debug_snapshot_length));
+                if (debug_pub_)
+                {
+                    debug_message_.data.assign(debug_snapshot_buffer.data(),
+                        debug_snapshot_length);
+                    debug_pub_->publish(debug_message_);
+                }
+            }
+
             if (cmd_out_state_message_.data.size() != state.commands.size())
             {
                 cmd_out_state_message_.data.resize(state.commands.size());
@@ -537,12 +680,6 @@ void MotionControllerRos::on_external_pose_(
         static_cast<FP_TYPE>(euler_z)
     };
     const auto& mask_3d = msg->mask;
-    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
-        "Received external pose reference position=[%.3f, %.3f, %.3f] "
-        "orientation=[%.3f, %.3f, %.3f].",
-        data_3d[0], data_3d[1], data_3d[2],
-        data_3d[3], data_3d[4], data_3d[5]);
-
     dispatch_3d_with_data(data_3d, mask_3d,
         [](auto& controller, const auto& d, const auto& m) {
             controller.set_current_pose_ref(d, m);
@@ -570,12 +707,6 @@ void MotionControllerRos::on_external_twist_(
         static_cast<FP_TYPE>(msg->reference.angular.z)
     };
     const auto& mask_3d = msg->mask;
-    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
-        "Received external twist reference linear=[%.3f, %.3f, %.3f] "
-        "angular=[%.3f, %.3f, %.3f].",
-        data_3d[0], data_3d[1], data_3d[2],
-        data_3d[3], data_3d[4], data_3d[5]);
-
     dispatch_3d_with_data(data_3d, mask_3d,
         [](auto& controller, const auto& d, const auto& m) {
             controller.set_current_twist_ref(d, m);
@@ -601,12 +732,6 @@ void MotionControllerRos::on_external_wrench_(
         static_cast<FP_TYPE>(msg->reference.torque.z)
     };
     const auto& mask_3d = msg->mask;
-    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
-        "Received external wrench reference force=[%.3f, %.3f, %.3f] "
-        "torque=[%.3f, %.3f, %.3f].",
-        data_3d[0], data_3d[1], data_3d[2],
-        data_3d[3], data_3d[4], data_3d[5]);
-
     dispatch_3d_with_data(data_3d, mask_3d,
         [](auto& controller, const auto& d, const auto& m) {
             controller.set_current_wrench_ref(d, m);
@@ -618,14 +743,6 @@ void MotionControllerRos::on_external_wrench_(
 void MotionControllerRos::on_navigation_status_(
     NavigationStatus::SharedPtr msg)
 {
-    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
-        "Received navigation feedback position=[%.3f, %.3f, %.3f] "
-        "linear_velocity=[%.3f, %.3f, %.3f] angular_velocity=[%.3f, %.3f, %.3f].",
-        msg->pose.pose.position.x, msg->pose.pose.position.y,
-        msg->pose.pose.position.z, msg->twist.twist.linear.x,
-        msg->twist.twist.linear.y, msg->twist.twist.linear.z,
-        msg->twist.twist.angular.x, msg->twist.twist.angular.y,
-        msg->twist.twist.angular.z);
     std::visit([&](auto& controller) {
         if constexpr (is_2d_controller<decltype(controller)>())
         {
@@ -695,12 +812,6 @@ void MotionControllerRos::on_external_pose_dev_(
     const auto& mask_3d = std::array<bool, 6>{
         true, true, true, true, true, true
     };
-    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
-        "Received cmd_pos position=[%.3f, %.3f, %.3f] "
-        "orientation=[%.3f, %.3f, %.3f].",
-        data_3d[0], data_3d[1], data_3d[2],
-        data_3d[3], data_3d[4], data_3d[5]);
-
     dispatch_3d_with_data(data_3d, mask_3d,
         [](auto& controller, const auto& d, const auto& m) {
             if constexpr (is_2d_controller<decltype(controller)>())
@@ -737,12 +848,6 @@ void MotionControllerRos::on_external_twist_dev_(
     const auto& mask_3d = std::array<bool, 6>{
         true, true, true, true, true, true
     };
-    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
-        "Received cmd_vel linear=[%.3f, %.3f, %.3f] "
-        "angular=[%.3f, %.3f, %.3f].",
-        data_3d[0], data_3d[1], data_3d[2],
-        data_3d[3], data_3d[4], data_3d[5]);
-
     dispatch_3d_with_data(data_3d, mask_3d,
         [](auto& controller, const auto& d, const auto& m) {
             if constexpr (is_2d_controller<decltype(controller)>())
@@ -778,12 +883,6 @@ void MotionControllerRos::on_external_wrench_dev_(
     const auto& mask_3d = std::array<bool, 6>{
         true, true, true, true, true, true
     };
-    RPP_LOG_DEBUG_THROTTLE(*logger_, std::chrono::seconds(1),
-        "Received cmd_tau force=[%.3f, %.3f, %.3f] "
-        "torque=[%.3f, %.3f, %.3f].",
-        data_3d[0], data_3d[1], data_3d[2],
-        data_3d[3], data_3d[4], data_3d[5]);
-
     dispatch_3d_with_data(data_3d, mask_3d,
         [](auto& controller, const auto& d, const auto& m) {
             if constexpr (is_2d_controller<decltype(controller)>())
