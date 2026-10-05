@@ -35,10 +35,15 @@ target_link_libraries(rpp_control
   ${nav_msgs_TARGETS}
   ${marble_control_msgs_TARGETS}
 )
-set(HOME_DIR "$ENV{HOME}")
+if(DEFINED ENV{RPP_HOME} AND NOT "$ENV{RPP_HOME}" STREQUAL "")
+  set(RPP_INTERFACES_CPP_DIR "$ENV{RPP_HOME}/interfaces/cpp")
+else()
+  set(RPP_INTERFACES_CPP_DIR "$ENV{HOME}/.rpp/interfaces/cpp")
+endif()
+
 target_include_directories(rpp_control PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${HOME_DIR}/.rpp/interfaces/cpp>
+    $<BUILD_INTERFACE:${RPP_INTERFACES_CPP_DIR}>
     $<INSTALL_INTERFACE:include>
 )
 

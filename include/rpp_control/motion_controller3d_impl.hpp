@@ -78,8 +78,12 @@ namespace rpp_control {
             const OutputMessage::Const& wrench)
         {
             return {
-                wrench.force().x(), wrench.force().y(), wrench.force().z(),
-                wrench.torque().x(), wrench.torque().y(), wrench.torque().z()
+                static_cast<FP_TYPE>(wrench.force().x()),
+                static_cast<FP_TYPE>(wrench.force().y()),
+                static_cast<FP_TYPE>(wrench.force().z()),
+                static_cast<FP_TYPE>(wrench.torque().x()),
+                static_cast<FP_TYPE>(wrench.torque().y()),
+                static_cast<FP_TYPE>(wrench.torque().z())
             };
         }
 

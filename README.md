@@ -2,27 +2,20 @@
 
 Control libraries for the RPP system.
 
-## Capability-normalized CascadeController2D
+## CascadeController2D and MotionController2DImpl
 
-`CascadeController2D` runs its pose and twist PID subcomponents in normalized
-coordinates. Configure each vehicle with three-element scale vectors ordered as
-`[x, y, yaw]`:
+`CascadeController2D` receives physical pose and twist values and produces a
+normalized wrench in `[-1, 1]`. It has no scale parameters. Configure the
+controller policy on `MotionController2DImpl`:
 
-- `pose_scales`: position in metres and heading in radians.
-- `twist_scales`: linear velocity in m/s and yaw rate in rad/s.
-- `wrench_positive_scales`: positive force in N, lateral force in N, and yaw
-  moment in Nm.
-- `wrench_negative_scales`: magnitudes for the corresponding negative wrench
-  limits.
+- `active_dofs` and `max_wrench_rate`;
+- `wrench_positive_scales` and `wrench_negative_scales`, ordered `[x, y, yaw]`;
+- `default_signal_tau` and `default_signal_nu`;
+- allocation-feedback suppression parameters.
 
-The cascade divides pose and twist by their scales before applying the PIDs.
-It bounds the normalized wrench to `[-1, 1]`, selects the directional wrench
-scale, and sends the resulting SI wrench to the allocator. The allocator then
-produces normalized actuator `cmd_out` values.
-
-`cmd_tau` remains an SI wrench reference; it is not normalized. For reusable
-inner-loop tuning, set PID output limits to `1.0` and provide vehicle-specific
-scale vectors.
+The signed wrench scales convert an internal normalized command to SI force and
+moment before allocation. They must be the vehicle's physical full-scale wrench
+limits. `cmd_tau` remains an SI external wrench reference and is not scaled.
 
 `PIDParameters.anti_windup_gain` is in `[0, 1]`: `0.0` permits normal
 integration at saturation, while `1.0` rejects integral action that would
@@ -40,20 +33,22 @@ force instead of summing incompatible sway and yaw demands.
 
 ## Allocation-feedback priority
 
-`MotionControllerRos` can suppress one internally controlled DOF when a
-higher-priority DOF causes the allocator to realize a materially different
-wrench. Configure the policy with:
+`MotionController2DImpl` compares residuals using its signed wrench scales,
+which are also used to denormalize the internal Cascade command.
+
+`MotionController2DImpl` can suppress one internally controlled DOF when a
+higher-priority DOF causes a conflicting realized wrench. Configure the
+policy with:
 
 - `allocation_priority_dof` and `allocation_suppressed_dof` — distinct active
   DOF names, such as `yaw` and `x`.
-- `allocation_priority_request_threshold` — minimum requested higher-priority
-  wrench magnitude.
-- `allocation_residual_activation_threshold` and
-  `allocation_residual_deactivation_threshold` — lower-priority wrench
-  residual thresholds in its SI unit. Activation must exceed deactivation.
+- `allocation_residual_activation_percent` and
+  `allocation_residual_deactivation_percent` — normalized residual thresholds;
+  deactivation must be lower than activation.
 
-The policy compares the previous requested and realized wrenches. While the
-priority request and residual exceed their thresholds, it disables the
-suppressed axis for the cascade pose and twist controllers, freezing that
-axis's PID state. Direct external wrench references remain unchanged. The
-existing control-state integration flag shows the suppressed PID as inactive.
+The policy compares the previous requested and realized wrenches. A yaw
+shortfall or an `x` residual suppresses the `x` cascade controller at the
+activation threshold and re-enables it below the lower deactivation threshold,
+even while yaw remains requested. Direct external wrench references remain
+unchanged. The existing control-state integration flag shows the suppressed PID
+as inactive.

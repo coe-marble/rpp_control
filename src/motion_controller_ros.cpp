@@ -175,134 +175,6 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
             "Invalid controller_type parameter. Must be '2D' or '3D'.");
     }
 
-    const std::vector<std::string> default_active_dofs = type == "2D"
-        ? std::vector<std::string>{"x", "y", "yaw"}
-        : std::vector<std::string>{
-            "x", "y", "z", "roll", "pitch", "yaw"};
-    const auto active_dof_names = declare_parameter<std::vector<std::string>>(
-        "active_dofs", default_active_dofs);
-    DOF active_dofs = NO_DOF;
-    for (const auto& dof_name : active_dof_names)
-    {
-        const DOF dof = get_dof_by_name(dof_name);
-        if (dof == NO_DOF)
-        {
-            throw std::runtime_error("Unknown active DOF: " + dof_name);
-        }
-        active_dofs = static_cast<DOF>(
-            static_cast<int>(active_dofs) | static_cast<int>(dof));
-    }
-
-    rcl_interfaces::msg::ParameterDescriptor allocation_dof_descriptor;
-    allocation_dof_descriptor.description =
-        "Higher-priority or lower-priority DOF for allocation feedback.";
-    allocation_dof_descriptor.read_only = true;
-    const std::string allocation_priority_dof_name = declare_parameter(
-        "allocation_priority_dof", "", allocation_dof_descriptor);
-    const std::string allocation_suppressed_dof_name = declare_parameter(
-        "allocation_suppressed_dof", "", allocation_dof_descriptor);
-
-    rcl_interfaces::msg::ParameterDescriptor priority_threshold_descriptor;
-    priority_threshold_descriptor.description =
-        "Non-negative priority-DOF wrench threshold in the corresponding wrench unit.";
-    priority_threshold_descriptor.read_only = true;
-    rcl_interfaces::msg::FloatingPointRange non_negative_range;
-    non_negative_range.from_value = 0.0;
-    non_negative_range.to_value = std::numeric_limits<double>::max();
-    non_negative_range.step = 0.0;
-    priority_threshold_descriptor.floating_point_range = {non_negative_range};
-    const double allocation_priority_request_threshold = declare_parameter(
-        "allocation_priority_request_threshold", 0.0,
-        priority_threshold_descriptor);
-
-    rcl_interfaces::msg::ParameterDescriptor reference_wrench_descriptor;
-    reference_wrench_descriptor.description =
-        "Positive nominal maximum wrench for the allocation-priority DOF.";
-    reference_wrench_descriptor.read_only = true;
-    rcl_interfaces::msg::FloatingPointRange positive_range;
-    positive_range.from_value = std::numeric_limits<double>::min();
-    positive_range.to_value = std::numeric_limits<double>::max();
-    positive_range.step = 0.0;
-    reference_wrench_descriptor.floating_point_range = {positive_range};
-    const double allocation_priority_dof_reference_wrench = declare_parameter(
-        "allocation_priority_dof_reference_wrench", 1.0,
-        reference_wrench_descriptor);
-
-    rcl_interfaces::msg::ParameterDescriptor residual_percentage_descriptor;
-    residual_percentage_descriptor.description =
-        "Priority-DOF allocation residual as a percentage of allocation_priority_dof_reference_wrench.";
-    residual_percentage_descriptor.read_only = true;
-    rcl_interfaces::msg::FloatingPointRange percentage_range;
-    percentage_range.from_value = 0.0;
-    percentage_range.to_value = 100.0;
-    percentage_range.step = 0.0;
-    residual_percentage_descriptor.floating_point_range = {percentage_range};
-    const double allocation_residual_activation_percent = declare_parameter(
-        "allocation_residual_activation_percent", 100.0,
-        residual_percentage_descriptor);
-    const double allocation_residual_deactivation_percent = declare_parameter(
-        "allocation_residual_deactivation_percent", 50.0,
-        residual_percentage_descriptor);
-    std::visit([active_dofs](auto& controller) {
-        using Controller = std::decay_t<decltype(controller)>;
-        if constexpr (!std::is_same_v<Controller, std::monostate>)
-        {
-            controller.set_active_dofs(active_dofs);
-        }
-    }, controller_);
-
-    rcl_interfaces::msg::ParameterDescriptor wrench_rate_limit_descriptor;
-    wrench_rate_limit_descriptor.description =
-        "Maximum requested-wrench rate per controller DOF; zero disables an axis limit.";
-    wrench_rate_limit_descriptor.read_only = true;
-    const auto max_wrench_rate = declare_parameter<std::vector<double>>(
-        "max_wrench_rate", std::vector<double>(type == "2D" ? 3 : 6, 0.0),
-        wrench_rate_limit_descriptor);
-    std::visit([&max_wrench_rate](auto& controller) {
-        using Controller = std::decay_t<decltype(controller)>;
-        if constexpr (!std::is_same_v<Controller, std::monostate>)
-        {
-            controller.set_wrench_rate_limits(max_wrench_rate);
-        }
-    }, controller_);
-
-    if (allocation_priority_dof_name.empty()
-        != allocation_suppressed_dof_name.empty())
-    {
-        throw std::runtime_error(
-            "allocation_priority_dof and allocation_suppressed_dof must be configured together.");
-    }
-    if (!allocation_priority_dof_name.empty())
-    {
-        const DOF priority_dof = get_dof_by_name(allocation_priority_dof_name);
-        const DOF suppressed_dof = get_dof_by_name(
-            allocation_suppressed_dof_name);
-        if (priority_dof == NO_DOF || suppressed_dof == NO_DOF)
-        {
-            throw std::runtime_error(
-                "Allocation suppression DOFs must use supported DOF names.");
-        }
-        std::visit([priority_dof, suppressed_dof,
-                    allocation_priority_request_threshold,
-                    allocation_priority_dof_reference_wrench,
-                    allocation_residual_activation_percent,
-                    allocation_residual_deactivation_percent](auto& controller) {
-            using Controller = std::decay_t<decltype(controller)>;
-            if constexpr (!std::is_same_v<Controller, std::monostate>)
-            {
-                controller.set_allocation_suppression(priority_dof,
-                    suppressed_dof, allocation_priority_request_threshold,
-                    allocation_priority_dof_reference_wrench,
-                    allocation_residual_activation_percent,
-                    allocation_residual_deactivation_percent);
-            }
-        }, controller_);
-        RPP_LOG_INFO(*logger_,
-            "Allocation feedback priority enabled: %s suppresses %s.",
-            allocation_priority_dof_name.c_str(),
-            allocation_suppressed_dof_name.c_str());
-    }
-
     std::visit([](auto& controller) {
         using Controller = std::decay_t<decltype(controller)>;
         if constexpr (!std::is_same_v<Controller, std::monostate>)
@@ -384,33 +256,6 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
             std::bind(&MotionControllerRos::on_external_wrench_dev_, this, _1));
     }
 
-    rcl_interfaces::msg::ParameterDescriptor desc_default_sig;
-    desc_default_sig.type = rcl_interfaces::msg::ParameterType::PARAMETER_STRING;
-    desc_default_sig.read_only = true;
-    const auto default_selection = [this, &desc_default_sig](
-        const std::string& parameter_name) {
-        const auto value = this->declare_parameter(
-            parameter_name, "DISABLED", desc_default_sig);
-        std::array<SignalStatus, DOF_END_i> selection{};
-        selection.fill(SIGNAL_DISABLED);
-        if (value == "INT")
-        {
-            selection.fill(SIGNAL_INT);
-        }
-        else if (value == "EXT")
-        {
-            selection.fill(SIGNAL_EXT);
-        }
-        else if (value != "DISABLED")
-        {
-            throw std::runtime_error(
-                "Default signal parameters must be INT, EXT, or DISABLED.");
-        }
-        return selection;
-    };
-    set_wrench_selection_(default_selection("default_signal_tau"));
-    set_twist_selection_(default_selection("default_signal_nu"));
-
     const double control_period = this->declare_parameter<double>(
         "control_period", 0.02);
     if (!std::isfinite(control_period) || control_period <= 0.0)
@@ -430,10 +275,10 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
             std::chrono::duration<double>(control_period)),
         std::bind(&MotionControllerRos::on_control_timer_, this));
     RPP_LOG_DEBUG(*logger_,
-        "Controller configured type=%s active_dofs=0x%x developer_topics=%d "
-        "control_period=%.3f max_control_dt=%.3f.",
-        type.c_str(), static_cast<unsigned int>(active_dofs),
-        expose_developer_topics, control_period, max_control_dt_);
+        "Controller configured type=%s developer_topics=%d control_period=%.3f "
+        "max_control_dt=%.3f.",
+        type.c_str(), expose_developer_topics, control_period,
+        max_control_dt_);
 }
 
 

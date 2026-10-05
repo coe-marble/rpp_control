@@ -196,8 +196,11 @@ TEST_F(TestMotionController, TestAllocationFeedbackSuppressesConflictingAxis) {
 
     auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(
         context);
-    controller_2d->set_allocation_suppression(
-        rpp_control::DOF_N, rpp_control::DOF_X, 0.0, 3000.0, 1.0, 0.5);
+    auto allocation_suppression =
+        rpp_control::MotionController2DImpl::AllocationSuppression{};
+    allocation_suppression.priority_dof = rpp_control::DOF_N;
+    allocation_suppression.suppressed_dof = rpp_control::DOF_X;
+    controller_2d->set_allocation_suppression(allocation_suppression);
     controller_2d->initialize();
     controller_2d->set_feedback({1.0, 2.0, 3.0}, {0.1, 0.2, 0.3});
     controller_2d->set_current_wrench_ref(
@@ -232,8 +235,8 @@ TEST_F(TestMotionController, TestRequestedWrenchRateLimit) {
 
     auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(
         context);
-    controller_2d->set_wrench_rate_limits({1000.0, 0.0, 0.0});
     controller_2d->initialize();
+    controller_2d->set_wrench_rate_limits({1000.0, 0.0, 0.0});
     controller_2d->set_feedback({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
     controller_2d->set_current_wrench_ref(
         {6000.0, 0.0, 0.0}, {true, false, false});
