@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -59,6 +60,20 @@ namespace rpp_control {
                 WrenchArray previous_requested_wrench{};
             };
 
+            struct Options
+            {
+                DOF active_dofs = Traits::default_active_dofs;
+                std::vector<double> max_wrench_rate =
+                    std::vector<double>(Dim::value, 0.0);
+                std::vector<double> wrench_positive_scales =
+                    std::vector<double>(Dim::value, 1.0);
+                std::vector<double> wrench_negative_scales =
+                    std::vector<double>(Dim::value, 1.0);
+                std::array<SignalStatus, Dim::value> default_wrench_selection{};
+                std::array<SignalStatus, Dim::value> default_twist_selection{};
+                std::optional<AllocationSuppression> allocation_suppression;
+            };
+
             explicit MotionControllerT(const rpp::ComponentContext& context)
                 : context_(&context),
                   active_dofs_(Traits::default_active_dofs),
@@ -87,9 +102,18 @@ namespace rpp_control {
             {
             }
 
-            const rpp::ComponentContext& context() const
+            void configure(const Options& options)
             {
-                return *context_;
+                set_active_dofs(options.active_dofs);
+                set_wrench_rate_limits(options.max_wrench_rate);
+                set_wrench_scales(options.wrench_positive_scales,
+                    options.wrench_negative_scales);
+                set_wrench_selection(options.default_wrench_selection);
+                set_twist_selection(options.default_twist_selection);
+                if (options.allocation_suppression)
+                {
+                    set_allocation_suppression(*options.allocation_suppression);
+                }
             }
 
         public:
@@ -753,6 +777,41 @@ namespace rpp_control {
                 limited_wrench_initialized_.fill(false);
             }
 
+            void prevent_priority_wrench_reversal_locked(
+                WrenchArray& wrench) const
+            {
+                if (!allocation_suppression_.active)
+                {
+                    return;
+                }
+
+                const size_t priority_index = dof_index(
+                    allocation_suppression_.priority_dof);
+                const size_t suppressed_index = dof_index(
+                    allocation_suppression_.suppressed_dof);
+                if (priority_index == Dim::value || suppressed_index == Dim::value)
+                {
+                    return;
+                }
+
+                const FP_TYPE priority_twist_reference =
+                    state_locked_.twist_ref[priority_index];
+                const bool suppressed_dof_is_uncommanded = std::abs(
+                    wrench[suppressed_index])
+                    <= std::numeric_limits<FP_TYPE>::epsilon();
+                const bool priority_direction_is_commanded = std::abs(
+                    priority_twist_reference)
+                    > std::numeric_limits<FP_TYPE>::epsilon();
+                const bool priority_wrench_reverses_direction =
+                    wrench[priority_index] * priority_twist_reference < 0.0;
+                if (suppressed_dof_is_uncommanded
+                    && priority_direction_is_commanded
+                    && priority_wrench_reverses_direction)
+                {
+                    wrench[priority_index] = 0.0;
+                }
+            }
+
             typename OutputMessage::Const limit_requested_wrench(
                 typename OutputMessage::Const requested_wrench,
                 const DOF control_dofs,
@@ -761,6 +820,7 @@ namespace rpp_control {
             {
                 WrenchArray wrench = Traits::wrench_values(requested_wrench);
                 std::lock_guard<std::mutex> lock(mutex_);
+                prevent_priority_wrench_reversal_locked(wrench);
                 for (size_t index = 0; index < Dim::value; ++index)
                 {
                     const DOF dof = get_dof_by_index<Dim::value>(index);
@@ -954,6 +1014,16 @@ namespace rpp_control {
 
                 const bool priority_requested = std::abs(priority_request)
                     > std::numeric_limits<FP_TYPE>::epsilon();
+                const bool priority_twist_is_commanded =
+                    state.twist_selection[priority_index] == SIGNAL_EXT
+                    && std::abs(state.twist_ref[priority_index])
+                        > std::numeric_limits<FP_TYPE>::epsilon();
+                const bool suppressed_twist_is_zero =
+                    state.twist_selection[suppressed_index] == SIGNAL_EXT
+                    && std::abs(state.twist_ref[suppressed_index])
+                        <= std::numeric_limits<FP_TYPE>::epsilon();
+                const bool direct_priority_requires_suppression =
+                    priority_twist_is_commanded && suppressed_twist_is_zero;
                 const double threshold_percent = allocation_suppression_.active
                     ? allocation_suppression_.residual_deactivation_percent
                     : allocation_suppression_.residual_activation_percent;
@@ -961,10 +1031,14 @@ namespace rpp_control {
                     priority_shortfall_percent >= threshold_percent;
                 const bool suppressed_dof_residual_requires_suppression =
                     suppressed_dof_residual_percent >= threshold_percent;
-                const bool suppress = priority_requested
+                const bool residual_requires_suppression = priority_requested
                     && (priority_shortfall_requires_suppression
                         || suppressed_dof_residual_requires_suppression);
-                const char* const reason = suppress
+                const bool suppress = direct_priority_requires_suppression
+                    || residual_requires_suppression;
+                const char* const reason = direct_priority_requires_suppression
+                    ? "zero suppressed DOF command requires priority"
+                    : residual_requires_suppression
                     ? priority_shortfall_requires_suppression
                     ? "priority shortfall requires priority"
                     : "suppressed DOF allocation residual requires priority"

@@ -3,8 +3,7 @@
 #include "motion_controller.hpp"
 
 #include <array>
-#include <string>
-#include <vector>
+#include <utility>
 
 #include <rpp_plugin_types/rpp_control/MotionController2D.hpp>
 #include <rpp_schema/rpp_control/EnablerOdometry2D.hpp>
@@ -158,128 +157,29 @@ namespace rpp_control {
     class MotionController2DImpl final : public MotionControllerT<MotionController2DTraits>
     {
         public:
-            using ParameterDescription = rpp::params::ParameterDescription;
-            RPP_PARAMETERS(
-                ParameterDescription::create<std::vector<std::string>>(
-                    "active_dofs", std::vector<std::string>{"x", "y", "yaw"}),
-                ParameterDescription::create<std::vector<double>>(
-                    "max_wrench_rate", std::vector<double>{0.0, 0.0, 0.0}),
-                ParameterDescription::create<std::vector<double>>(
-                    "wrench_positive_scales",
-                    std::vector<double>{1.0, 1.0, 1.0}),
-                ParameterDescription::create<std::vector<double>>(
-                    "wrench_negative_scales",
-                    std::vector<double>{1.0, 1.0, 1.0}),
-                ParameterDescription::create<std::string>(
-                    "allocation_priority_dof", ""),
-                ParameterDescription::create<std::string>(
-                    "allocation_suppressed_dof", ""),
-                ParameterDescription::create<double>(
-                    "allocation_residual_activation_percent", 10.0),
-                ParameterDescription::create<double>(
-                    "allocation_residual_deactivation_percent", 2.5),
-                ParameterDescription::create<std::string>(
-                    "default_signal_tau", "DISABLED"),
-                ParameterDescription::create<std::string>(
-                    "default_signal_nu", "DISABLED")
-            )
+            using Base = MotionControllerT<MotionController2DTraits>;
+            using AllocationSuppression = Base::AllocationSuppression;
+            using Options = Base::Options;
 
             RPP_COMPONENTS(
                 {"controller", "rpp_control::MotionController2D"},
                 {"allocator", "rpp_control::MotionControllerAllocator2D"}
             )
 
-            explicit MotionController2DImpl(const rpp::ComponentContext& context)
-                : MotionControllerT<MotionController2DTraits>(context)
+            explicit MotionController2DImpl(const rpp::ComponentContext& context,
+                Options options = {})
+                : MotionControllerT<MotionController2DTraits>(context),
+                  options_(std::move(options))
             {
             }
 
         protected:
             void configure() override
             {
-                const auto active_dof_names =
-                    context().get_parameter<std::vector<std::string>>(
-                        "active_dofs");
-                DOF active_dofs = NO_DOF;
-                for (const auto& dof_name : active_dof_names)
-                {
-                    const DOF dof = get_dof_by_name(dof_name);
-                    if (dof == NO_DOF)
-                    {
-                        throw std::invalid_argument(
-                            "Unknown active DOF: " + dof_name);
-                    }
-                    active_dofs = static_cast<DOF>(
-                        static_cast<int>(active_dofs) | static_cast<int>(dof));
-                }
-                set_active_dofs(active_dofs);
-                set_wrench_rate_limits(
-                    context().get_parameter<std::vector<double>>(
-                        "max_wrench_rate"));
-                set_wrench_scales(
-                    context().get_parameter<std::vector<double>>(
-                        "wrench_positive_scales"),
-                    context().get_parameter<std::vector<double>>(
-                        "wrench_negative_scales"));
-                set_wrench_selection(default_signal_selection(
-                    context().get_parameter<std::string>("default_signal_tau")));
-                set_twist_selection(default_signal_selection(
-                    context().get_parameter<std::string>("default_signal_nu")));
-
-                const auto priority_dof_name =
-                    context().get_parameter<std::string>(
-                        "allocation_priority_dof");
-                const auto suppressed_dof_name =
-                    context().get_parameter<std::string>(
-                        "allocation_suppressed_dof");
-                if (priority_dof_name.empty() != suppressed_dof_name.empty())
-                {
-                    throw std::invalid_argument(
-                        "allocation_priority_dof and allocation_suppressed_dof must be configured together.");
-                }
-                if (priority_dof_name.empty())
-                {
-                    return;
-                }
-
-                AllocationSuppression suppression{};
-                suppression.priority_dof = get_dof_by_name(priority_dof_name);
-                suppression.suppressed_dof = get_dof_by_name(suppressed_dof_name);
-                if (suppression.priority_dof == NO_DOF
-                    || suppression.suppressed_dof == NO_DOF)
-                {
-                    throw std::invalid_argument(
-                        "Allocation suppression DOFs must use supported DOF names.");
-                }
-                suppression.residual_activation_percent =
-                    context().get_parameter<double>(
-                        "allocation_residual_activation_percent");
-                suppression.residual_deactivation_percent =
-                    context().get_parameter<double>(
-                        "allocation_residual_deactivation_percent");
-                set_allocation_suppression(suppression);
+                Base::configure(options_);
             }
 
         private:
-            static std::array<SignalStatus, 3> default_signal_selection(
-                const std::string& value)
-            {
-                std::array<SignalStatus, 3> selection{};
-                selection.fill(SIGNAL_DISABLED);
-                if (value == "INT")
-                {
-                    selection.fill(SIGNAL_INT);
-                }
-                else if (value == "EXT")
-                {
-                    selection.fill(SIGNAL_EXT);
-                }
-                else if (value != "DISABLED")
-                {
-                    throw std::invalid_argument(
-                        "Default signal parameters must be INT, EXT, or DISABLED.");
-                }
-                return selection;
-            }
+            Options options_;
     };
 }

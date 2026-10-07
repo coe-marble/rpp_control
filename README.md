@@ -5,13 +5,14 @@ Control libraries for the RPP system.
 ## CascadeController2D and MotionController2DImpl
 
 `CascadeController2D` receives physical pose and twist values and produces a
-normalized wrench in `[-1, 1]`. It has no scale parameters. Configure the
-controller policy on `MotionController2DImpl`:
+normalized wrench in `[-1, 1]`. It has no scale parameters. ROS supplies the
+following namespaced options to `MotionController2DImpl`:
 
-- `active_dofs` and `max_wrench_rate`;
-- `wrench_positive_scales` and `wrench_negative_scales`, ordered `[x, y, yaw]`;
-- `default_signal_tau` and `default_signal_nu`;
-- allocation-feedback suppression parameters.
+- `controller.active_dofs` and `controller.max_wrench_rate`;
+- `controller.wrench_positive_scales` and
+  `controller.wrench_negative_scales`, ordered `[x, y, yaw]`;
+- `controller.default_signal_tau` and `controller.default_signal_nu`;
+- `controller.allocation_*` suppression parameters.
 
 The signed wrench scales convert an internal normalized command to SI force and
 moment before allocation. They must be the vehicle's physical full-scale wrench

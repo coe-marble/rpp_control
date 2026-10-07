@@ -47,6 +47,8 @@ namespace rpp_control {
         rclcpp::TimerBase::SharedPtr control_timer_;
 
     private:
+        MotionController2DImpl::Options create_controller_2d_options_();
+
         void set_wrench_selection_(
             const std::array<SignalStatus, DOF_END_i>& wrench_selection);
         void set_twist_selection_(

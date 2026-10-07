@@ -222,6 +222,45 @@ TEST_F(TestMotionController, TestAllocationFeedbackSuppressesConflictingAxis) {
     EXPECT_LT(std::abs(state.wrench[2]), std::abs(state.wrench_ref[2]));
 }
 
+TEST_F(TestMotionController, TestZeroSurgeCommandSuppressesSurgeForYawRate) {
+    auto context = rpp::ComponentContextBuilder(rpp::RPP_CLOCK_MOCK)
+        .build_script_from_description_path(
+            test_data_dir + "/test_description/motion_controller2d.json",
+            std::nullopt,
+            test_data_dir + "/test_ws_parts");
+
+    auto clock = std::dynamic_pointer_cast<rpp::RppClockMock>(
+        context.get_clock());
+    clock->set_time(100.0);
+
+    auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(
+        context);
+    auto allocation_suppression =
+        rpp_control::MotionController2DImpl::AllocationSuppression{};
+    allocation_suppression.priority_dof = rpp_control::DOF_N;
+    allocation_suppression.suppressed_dof = rpp_control::DOF_X;
+    controller_2d->set_allocation_suppression(allocation_suppression);
+    controller_2d->initialize();
+    controller_2d->set_feedback({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+    controller_2d->set_current_twist_ref(
+        {0.0, 0.0, 0.05}, {true, false, true});
+    controller_2d->set_twist_selection(
+        {rpp_control::SIGNAL_EXT,
+         rpp_control::SIGNAL_DISABLED,
+         rpp_control::SIGNAL_EXT});
+    controller_2d->set_wrench_selection(
+        {rpp_control::SIGNAL_INT,
+         rpp_control::SIGNAL_DISABLED,
+         rpp_control::SIGNAL_INT});
+
+    EXPECT_TRUE(controller_2d->step(0.01));
+
+    auto state = rpp_control::MotionController2DImpl::ControllerIO::State{};
+    controller_2d->get_live_state(state);
+    EXPECT_TRUE(state.allocation_suppressed[0]);
+    EXPECT_NEAR(state.wrench_ref[0], 0.0, EPSILON);
+}
+
 TEST_F(TestMotionController, TestRequestedWrenchRateLimit) {
     auto context = rpp::ComponentContextBuilder(rpp::RPP_CLOCK_MOCK)
         .build_script_from_description_path(
@@ -254,6 +293,54 @@ TEST_F(TestMotionController, TestRequestedWrenchRateLimit) {
     EXPECT_TRUE(controller_2d->step(0.1));
     controller_2d->get_live_state(state);
     EXPECT_NEAR(state.wrench_ref[0], 200.0, EPSILON);
+}
+
+TEST_F(TestMotionController, TestSuppressedSurgeDoesNotReverseYawWrench) {
+    auto context = rpp::ComponentContextBuilder(rpp::RPP_CLOCK_MOCK)
+        .build_script_from_description_path(
+            test_data_dir + "/test_description/motion_controller2d.json",
+            std::nullopt,
+            test_data_dir + "/test_ws_parts");
+
+    auto clock = std::dynamic_pointer_cast<rpp::RppClockMock>(
+        context.get_clock());
+    clock->set_time(100.0);
+
+    auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(
+        context);
+    auto allocation_suppression =
+        rpp_control::MotionController2DImpl::AllocationSuppression{};
+    allocation_suppression.priority_dof = rpp_control::DOF_N;
+    allocation_suppression.suppressed_dof = rpp_control::DOF_X;
+    controller_2d->set_allocation_suppression(allocation_suppression);
+    controller_2d->initialize();
+    controller_2d->set_feedback({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+    controller_2d->set_current_twist_ref(
+        {0.0, 0.0, 0.1}, {false, false, true});
+    controller_2d->set_current_wrench_ref(
+        {0.0, 0.0, 3000.0}, {true, false, true});
+    controller_2d->set_twist_selection(
+        {rpp_control::SIGNAL_DISABLED,
+         rpp_control::SIGNAL_DISABLED,
+         rpp_control::SIGNAL_EXT});
+    controller_2d->set_wrench_selection(
+        {rpp_control::SIGNAL_EXT,
+         rpp_control::SIGNAL_DISABLED,
+         rpp_control::SIGNAL_EXT});
+
+    EXPECT_TRUE(controller_2d->step(0.01));
+    clock->elapse(0.01);
+    EXPECT_TRUE(controller_2d->step(0.01));
+
+    controller_2d->set_current_wrench_ref(
+        {0.0, 0.0, -3000.0}, {true, false, true});
+    clock->elapse(0.01);
+    EXPECT_TRUE(controller_2d->step(0.01));
+
+    auto state = rpp_control::MotionController2DImpl::ControllerIO::State{};
+    controller_2d->get_live_state(state);
+    EXPECT_TRUE(state.allocation_suppressed[0]);
+    EXPECT_NEAR(state.wrench_ref[2], 0.0, EPSILON);
 }
 
 int main(int argc, char **argv) {

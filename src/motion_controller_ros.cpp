@@ -68,6 +68,27 @@ bool to_reference_type(
     }
 }
 
+std::array<rpp_control::SignalStatus, 3> parse_default_selection(
+    const std::string& value)
+{
+    std::array<rpp_control::SignalStatus, 3> selection{};
+    selection.fill(rpp_control::SIGNAL_DISABLED);
+    if (value == "INT")
+    {
+        selection.fill(rpp_control::SIGNAL_INT);
+    }
+    else if (value == "EXT")
+    {
+        selection.fill(rpp_control::SIGNAL_EXT);
+    }
+    else if (value != "DISABLED")
+    {
+        throw std::runtime_error(
+            "Controller default signal parameters must be INT, EXT, or DISABLED.");
+    }
+    return selection;
+}
+
 template <size_t BufferSize, typename State>
 size_t format_control_snapshot(
     std::array<char, BufferSize>& buffer, const State& state,
@@ -155,6 +176,12 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
         throw std::runtime_error("rpp_workspace must be specified.");
     }
 
+    MotionController2DImpl::Options controller_2d_options{};
+    if (type == "2D")
+    {
+        controller_2d_options = create_controller_2d_options_();
+    }
+
     rpp::RppDataManager data_manager(rpp::RPP_HOME, rpp_workspace);
     rpp::ComponentContextBuilder context_builder(data_manager);
     context_ = std::make_unique<rpp::ComponentContext>(
@@ -163,7 +190,8 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
 
     if (type == "2D")
     {
-        controller_.emplace<MotionController2DImpl>(*context_);
+        controller_.emplace<MotionController2DImpl>(
+            *context_, std::move(controller_2d_options));
     }
     else if (type == "3D")
     {
@@ -887,6 +915,68 @@ void MotionControllerRos::request_control_(
     }
     RPP_LOG_DEBUG(*logger_, "Control authority request %s.",
         success ? "granted" : "denied");
+}
+
+MotionController2DImpl::Options
+MotionControllerRos::create_controller_2d_options_()
+{
+    MotionController2DImpl::Options options{};
+    const auto active_dof_names = declare_parameter<std::vector<std::string>>(
+        "controller.active_dofs", {"x", "y", "yaw"});
+    options.active_dofs = NO_DOF;
+    for (const auto& dof_name : active_dof_names)
+    {
+        const DOF dof = get_dof_by_name(dof_name);
+        if (dof == NO_DOF)
+        {
+            throw std::runtime_error("Unknown active DOF: " + dof_name);
+        }
+        options.active_dofs = static_cast<DOF>(
+            static_cast<int>(options.active_dofs) | static_cast<int>(dof));
+    }
+    options.max_wrench_rate = declare_parameter<std::vector<double>>(
+        "controller.max_wrench_rate", {0.0, 0.0, 0.0});
+    options.wrench_positive_scales = declare_parameter<std::vector<double>>(
+        "controller.wrench_positive_scales", {1.0, 1.0, 1.0});
+    options.wrench_negative_scales = declare_parameter<std::vector<double>>(
+        "controller.wrench_negative_scales", {1.0, 1.0, 1.0});
+    options.default_wrench_selection = parse_default_selection(
+        declare_parameter<std::string>(
+            "controller.default_signal_tau", "DISABLED"));
+    options.default_twist_selection = parse_default_selection(
+        declare_parameter<std::string>(
+            "controller.default_signal_nu", "DISABLED"));
+
+    const auto priority_dof_name = declare_parameter<std::string>(
+        "controller.allocation_priority_dof", "");
+    const auto suppressed_dof_name = declare_parameter<std::string>(
+        "controller.allocation_suppressed_dof", "");
+    if (priority_dof_name.empty() != suppressed_dof_name.empty())
+    {
+        throw std::runtime_error(
+            "controller.allocation_priority_dof and "
+            "controller.allocation_suppressed_dof must be configured together.");
+    }
+    if (priority_dof_name.empty())
+    {
+        return options;
+    }
+
+    MotionController2DImpl::AllocationSuppression suppression{};
+    suppression.priority_dof = get_dof_by_name(priority_dof_name);
+    suppression.suppressed_dof = get_dof_by_name(suppressed_dof_name);
+    if (suppression.priority_dof == NO_DOF
+        || suppression.suppressed_dof == NO_DOF)
+    {
+        throw std::runtime_error(
+            "Controller allocation suppression DOFs must use supported DOF names.");
+    }
+    suppression.residual_activation_percent = declare_parameter<double>(
+        "controller.allocation_residual_activation_percent", 10.0);
+    suppression.residual_deactivation_percent = declare_parameter<double>(
+        "controller.allocation_residual_deactivation_percent", 2.5);
+    options.allocation_suppression = suppression;
+    return options;
 }
 
 }
