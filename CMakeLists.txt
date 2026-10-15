@@ -16,6 +16,7 @@ find_package(rpp_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(std_srvs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(marble_control_msgs REQUIRED)
 
@@ -32,6 +33,7 @@ target_link_libraries(rpp_control
   rpp_cpp::rpp_cpp
   ${geometry_msgs_TARGETS}
   ${std_msgs_TARGETS}
+  ${std_srvs_TARGETS}
   ${nav_msgs_TARGETS}
   ${marble_control_msgs_TARGETS}
 )

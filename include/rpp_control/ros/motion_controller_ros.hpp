@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <vector>
@@ -8,6 +9,7 @@
 #include <rpp_cpp/plugin.hpp>
 #include <rpp_cpp/context_builder.hpp>
 #include <rpp_cpp/logger.hpp>
+#include <std_srvs/srv/set_bool.hpp>
 
 #include "ros_defs.hpp"
 #include "../utils.hpp"
@@ -69,6 +71,8 @@ namespace rpp_control {
 
         std::chrono::steady_clock::time_point last_control_tick_;
         double max_control_dt_ = 0.0;
+        double cmd_out_thrust_limit_ = 1.0;
+        std::atomic_bool control_enabled_{true};
         rpp::LogThrottle debug_snapshot_throttle_;
         String debug_message_;
         Float32MultiArray cmd_out_state_message_;
@@ -102,6 +106,10 @@ namespace rpp_control {
         void select_signal_(
             SelectSignal::Request::SharedPtr request,
             SelectSignal::Response::SharedPtr response);
+
+        rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr ctl_enable_svc_;
+        void ctl_enable_(std_srvs::srv::SetBool::Request::SharedPtr request,
+            std_srvs::srv::SetBool::Response::SharedPtr response);
 
 
         bool check_control_identity_token(const std::string& identity_token);
