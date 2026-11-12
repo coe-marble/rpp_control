@@ -72,7 +72,7 @@ namespace rpp_control {
         void on_control_timer_();
         void publish_control_result_(bool control_active, double dt);
 
-        std::chrono::steady_clock::time_point last_control_tick_;
+        rclcpp::Time last_control_tick_{0, 0, RCL_ROS_TIME};
         double max_control_dt_ = 0.0;
         double cmd_out_thrust_limit_ = 1.0;
         CommandAgeFilter command_age_filter_;

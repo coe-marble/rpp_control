@@ -20,7 +20,7 @@ public:
         ParameterDescription::create<double>("jet_x", -1.5),
         ParameterDescription::create<double>("jet_y", 0.0),
         ParameterDescription::create<double>("max_thrust", 6000.0),
-        ParameterDescription::create<double>("max_angle", 0.61),
+        ParameterDescription::create<double>("max_angle", 0.5235987756),
         ParameterDescription::create<double>("mass", 450.0),
         ParameterDescription::create<double>("z_cg", 0.4),
         ParameterDescription::create<double>("metacentric_height", 0.3),

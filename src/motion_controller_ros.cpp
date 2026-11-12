@@ -323,10 +323,9 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
         throw std::runtime_error(
             "Parameter 'max_control_dt' must be finite and at least control_period.");
     }
-    last_control_tick_ = std::chrono::steady_clock::now();
-    control_timer_ = create_wall_timer(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::duration<double>(control_period)),
+    last_control_tick_ = this->now();
+    control_timer_ = this->create_timer(
+        std::chrono::duration<double>(control_period),
         std::bind(&MotionControllerRos::on_control_timer_, this));
     RPP_LOG_DEBUG(*logger_,
         "Controller configured type=%s developer_topics=%d control_period=%.3f "
@@ -343,9 +342,8 @@ void MotionControllerRos::on_control_timer_()
         return;
     }
 
-    const auto now = std::chrono::steady_clock::now();
-    const double dt = std::chrono::duration<double>(
-        now - last_control_tick_).count();
+    const auto now = this->now();
+    const double dt = (now - last_control_tick_).seconds();
     last_control_tick_ = now;
 
     bool control_active = false;
