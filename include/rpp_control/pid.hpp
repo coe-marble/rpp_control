@@ -44,7 +44,8 @@ public:
     params_ = params;
   }
 
-  FP_TYPE step(FP_TYPE ref, FP_TYPE state, FP_TYPE dt)
+  // angular: ref and state are angles in rad and the error is wrapped to [-pi, pi].
+  FP_TYPE step(FP_TYPE ref, FP_TYPE state, FP_TYPE dt, bool angular = false)
   {
     if (!std::isfinite(ref) || !std::isfinite(state) ||
       !std::isfinite(dt) || dt <= 0.0)
@@ -55,7 +56,7 @@ public:
 
     auto candidate = error_info_;
     if (!update_controller_axis_error_info(
-                    candidate, ref, state, dt, params_.ki != 0.0))
+                    candidate, ref, state, dt, params_.ki != 0.0, angular))
     {
       reset();
       return 0.0;

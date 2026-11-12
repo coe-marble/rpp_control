@@ -46,15 +46,22 @@ inline void write_controller_axis_error_info(
 
 inline bool update_controller_axis_error_info(
   ControllerAxisErrorInfo & info, const FP_TYPE reference, const FP_TYPE state,
-  const FP_TYPE dt, const bool integrate = true)
+  const FP_TYPE dt, const bool integrate = true, const bool angular = false)
 {
   if (!std::isfinite(reference) || !std::isfinite(state) ||
     !std::isfinite(dt) || dt <= 0.0)
   {
     return false;
   }
-  const auto error = reference - state;
-  const auto derivative = (error - info.previous_error) / dt;
+  auto error = reference - state;
+  // An angle difference is wrapped to [-pi, pi] so the controller turns the short way.
+  if (angular && std::isfinite(error)) {error = std::atan2(std::sin(error), std::cos(error));}
+  auto error_delta = error - info.previous_error;
+  // The step of an angle error is wrapped too, so crossing +-pi gives no derivative spike.
+  if (angular && std::isfinite(error_delta)) {
+    error_delta = std::atan2(std::sin(error_delta), std::cos(error_delta));
+  }
+  const auto derivative = error_delta / dt;
   if (!std::isfinite(error) || !std::isfinite(derivative)) {return false;}
 
   const auto integral = integrate ? info.integral_error + error * dt : info.integral_error;

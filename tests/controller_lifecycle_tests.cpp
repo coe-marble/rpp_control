@@ -75,6 +75,36 @@ TEST(ControllerLifecycle, PidErrorHistoryCanBeRestoredAndRejectsNonFiniteState)
   EXPECT_THROW(restored.restore_error_info(invalid), std::invalid_argument);
 }
 
+TEST(ControllerLifecycle, AngularPidWrapsYawErrorToTheShortWay)
+{
+  constexpr float pi = 3.14159265358979F;
+  constexpr float degree = pi / 180.0F;
+  rpp_control::PIDParameters parameters{};
+  parameters.kp = 1.0F;
+
+  rpp_control::PID wrapped(parameters);
+  EXPECT_NEAR(wrapped.step(170.0F * degree, -170.0F * degree, 0.02F, true), -20.0F * degree, 1e-5);
+  EXPECT_NEAR(wrapped.error_info().previous_error, -20.0F * degree, 1e-5);
+
+  rpp_control::PID wrapped_back(parameters);
+  EXPECT_NEAR(wrapped_back.step(-170.0F * degree, 170.0F * degree, 0.02F, true), 20.0F * degree,
+    1e-5);
+
+  rpp_control::PID plain_angular(parameters);
+  EXPECT_NEAR(plain_angular.step(30.0F * degree, 10.0F * degree, 0.02F, true), 20.0F * degree,
+    1e-5);
+
+  rpp_control::PID linear(parameters);
+  EXPECT_NEAR(linear.step(170.0F * degree, -170.0F * degree, 0.02F), 340.0F * degree, 1e-5);
+
+  // The error moves from +179 deg to -179 deg: a step of 2 deg, not of -358 deg.
+  parameters.kp = 0.0F;
+  parameters.kd = 1.0F;
+  rpp_control::PID derivative(parameters);
+  (void)derivative.step(179.0F * degree, 0.0F, 1.0F, true);
+  EXPECT_NEAR(derivative.step(-179.0F * degree, 0.0F, 1.0F, true), 2.0F * degree, 1e-5);
+}
+
 TEST(ControllerLifecycle, CascadeTransfersPoseAndTwistPidHistories)
 {
   auto runtime = build_control_runtime();
