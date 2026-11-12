@@ -21,9 +21,9 @@ struct ControllerAxisErrorInfo
 
 inline bool is_valid_controller_axis_error_info(const ControllerAxisErrorInfo & info)
 {
-  return std::isfinite(info.integral_error)
-    && std::isfinite(info.previous_error)
-    && std::isfinite(info.previous_derivative);
+  return std::isfinite(info.integral_error) &&
+         std::isfinite(info.previous_error) &&
+         std::isfinite(info.previous_derivative);
 }
 
 inline ControllerAxisErrorInfo read_controller_axis_error_info(
@@ -48,8 +48,9 @@ inline bool update_controller_axis_error_info(
   ControllerAxisErrorInfo & info, const FP_TYPE reference, const FP_TYPE state,
   const FP_TYPE dt, const bool integrate = true)
 {
-  if (!std::isfinite(reference) || !std::isfinite(state)
-    || !std::isfinite(dt) || dt <= 0.0) {
+  if (!std::isfinite(reference) || !std::isfinite(state) ||
+    !std::isfinite(dt) || dt <= 0.0)
+  {
     return false;
   }
   const auto error = reference - state;

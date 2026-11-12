@@ -5,14 +5,15 @@
 #include <rpp_control/ros/command_age_filter.hpp>
 #include <rpp_control/ros/command_types.hpp>
 
-namespace {
+namespace
+{
 
 builtin_interfaces::msg::Time stamp(std::int32_t sec, std::uint32_t nanosec = 0)
 {
-    builtin_interfaces::msg::Time value;
-    value.sec = sec;
-    value.nanosec = nanosec;
-    return value;
+  builtin_interfaces::msg::Time value;
+  value.sec = sec;
+  value.nanosec = nanosec;
+  return value;
 }
 
 const rclcpp::Time now(10, 0, RCL_ROS_TIME);
@@ -55,35 +56,35 @@ TEST(CommandAgePolicy, disabled_filter_ignores_stamp_age_and_validity)
 TEST(CommandAgePolicy, validates_age_parameter_even_when_filter_is_disabled)
 {
     for (double age : {0.0, -0.5, 1e-12, 1e20,
-        std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
-    {
-        EXPECT_THROW(rpp_control::CommandAgePolicy(true, age), std::invalid_argument);
-        EXPECT_THROW(rpp_control::CommandAgePolicy(false, age), std::invalid_argument);
+      std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
+  {
+    EXPECT_THROW(rpp_control::CommandAgePolicy(true, age), std::invalid_argument);
+    EXPECT_THROW(rpp_control::CommandAgePolicy(false, age), std::invalid_argument);
     }
     EXPECT_NO_THROW(rpp_control::CommandAgePolicy(true, 1e-9));
 }
 
 class CommandAgeParameters : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        context = std::make_shared<rclcpp::Context>();
-        context->init(0, nullptr);
-        rclcpp::NodeOptions options;
-        options.context(context).enable_rosout(false)
-            .start_parameter_services(false).start_parameter_event_publisher(false);
-        node = std::make_shared<rclcpp::Node>("command_age_filter_test", options);
-        filter = std::make_unique<rpp_control::CommandAgeFilter>(*node);
-    }
-    void TearDown() override
-    {
-        filter.reset();
-        node.reset();
-        context->shutdown("test finished");
-    }
-    std::shared_ptr<rclcpp::Context> context;
-    std::shared_ptr<rclcpp::Node> node;
-    std::unique_ptr<rpp_control::CommandAgeFilter> filter;
+  void SetUp() override
+  {
+    context = std::make_shared<rclcpp::Context>();
+    context->init(0, nullptr);
+    rclcpp::NodeOptions options;
+    options.context(context).enable_rosout(false)
+    .start_parameter_services(false).start_parameter_event_publisher(false);
+    node = std::make_shared<rclcpp::Node>("command_age_filter_test", options);
+    filter = std::make_unique<rpp_control::CommandAgeFilter>(*node);
+  }
+  void TearDown() override
+  {
+    filter.reset();
+    node.reset();
+    context->shutdown("test finished");
+  }
+  std::shared_ptr<rclcpp::Context> context;
+  std::shared_ptr<rclcpp::Node> node;
+  std::unique_ptr<rpp_control::CommandAgeFilter> filter;
 };
 
 TEST_F(CommandAgeParameters, declares_enabled_filter_and_half_second_limit)
@@ -99,20 +100,23 @@ TEST_F(CommandAgeParameters, valid_runtime_changes_apply_immediately)
 {
     const auto old = stamp(9, 250000000);
     EXPECT_FALSE(filter->accepts(&old, now));
-    EXPECT_TRUE(node->set_parameter(rclcpp::Parameter("max_stamped_message_age_sec", 1.0)).successful);
+    EXPECT_TRUE(node->set_parameter(rclcpp::Parameter("max_stamped_message_age_sec",
+      1.0)).successful);
     EXPECT_TRUE(filter->accepts(&old, now));
-    EXPECT_TRUE(node->set_parameter(rclcpp::Parameter("discard_old_stamped_messages", false)).successful);
+    EXPECT_TRUE(node->set_parameter(rclcpp::Parameter("discard_old_stamped_messages",
+      false)).successful);
     const auto very_old = stamp(0);
     EXPECT_TRUE(filter->accepts(&very_old, now));
-    EXPECT_TRUE(node->set_parameter(rclcpp::Parameter("discard_old_stamped_messages", true)).successful);
+    EXPECT_TRUE(node->set_parameter(rclcpp::Parameter("discard_old_stamped_messages",
+      true)).successful);
     EXPECT_FALSE(filter->accepts(&very_old, now));
 }
 
 TEST_F(CommandAgeParameters, invalid_atomic_change_preserves_both_parameters_and_policy)
 {
     const auto result = node->set_parameters_atomically({
-        rclcpp::Parameter("discard_old_stamped_messages", false),
-        rclcpp::Parameter("max_stamped_message_age_sec", -1.0)});
+      rclcpp::Parameter("discard_old_stamped_messages", false),
+      rclcpp::Parameter("max_stamped_message_age_sec", -1.0)});
     EXPECT_FALSE(result.successful);
     EXPECT_FALSE(result.reason.empty());
     EXPECT_TRUE(node->get_parameter("discard_old_stamped_messages").as_bool());
@@ -129,15 +133,16 @@ TEST_F(CommandAgeParameters, another_callback_veto_cannot_partially_disable_filt
     // Register this callback first so the filter validates before the veto:
     // ROS invokes on-set callbacks in reverse registration order.
     const auto veto = other.add_on_set_parameters_callback(
-        [&veto_changes](const std::vector<rclcpp::Parameter>&) {
-            rcl_interfaces::msg::SetParametersResult result;
-            result.successful = !veto_changes;
-            result.reason = "Rejected by another validator";
-            return result;
+    [&veto_changes](const std::vector<rclcpp::Parameter> &) {
+      rcl_interfaces::msg::SetParametersResult result;
+      result.successful = !veto_changes;
+      result.reason = "Rejected by another validator";
+      return result;
         });
     rpp_control::CommandAgeFilter other_filter(other);
     veto_changes = true;
-    EXPECT_FALSE(other.set_parameter(rclcpp::Parameter("discard_old_stamped_messages", false)).successful);
+    EXPECT_FALSE(other.set_parameter(rclcpp::Parameter("discard_old_stamped_messages",
+      false)).successful);
     const auto old = stamp(9);
     EXPECT_FALSE(other_filter.accepts(&old, now));
 }
@@ -146,9 +151,9 @@ TEST_F(CommandAgeParameters, startup_parameter_overrides_are_honored_and_validat
 {
     rclcpp::NodeOptions options;
     options.context(context).enable_rosout(false)
-        .start_parameter_services(false).start_parameter_event_publisher(false)
-        .parameter_overrides({rclcpp::Parameter("discard_old_stamped_messages", false),
-            rclcpp::Parameter("max_stamped_message_age_sec", 0.25)});
+  .start_parameter_services(false).start_parameter_event_publisher(false)
+  .parameter_overrides({rclcpp::Parameter("discard_old_stamped_messages", false),
+      rclcpp::Parameter("max_stamped_message_age_sec", 0.25)});
     rclcpp::Node configured("command_age_startup_test", options);
     rpp_control::CommandAgeFilter configured_filter(configured);
     const auto old = stamp(0);

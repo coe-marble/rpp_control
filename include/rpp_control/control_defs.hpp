@@ -17,14 +17,15 @@
 
 #define FP_TYPE float
 
-namespace rpp_control {
-
+namespace rpp_control
+{
 
 
 /**
  * Indices of the DOFS
  */
-enum DOF_i {
+enum DOF_i
+{
   DOF_X_i = 0,
   DOF_Y_i,
   DOF_Z_i,
@@ -48,27 +49,27 @@ const std::array<std::string, DOF_END_i> DOF_NAMES{{"x", "y", "z", "roll", "pitc
 /**
  * State data that is read and written frequently during control.
  */
-template <size_t Dim>
+template<size_t Dim>
 struct ControllerIOStateT
 {
-  ControllerIOStateT() :
-      has_any_pose_ext(false),
-      has_any_twist_ext(false),
-      has_any_wrench_ext(false),
-      has_feedback(false),
-      has_pose_ext{},
-      has_twist_ext{},
-      has_wrench_ext{},
-      pose_ref{},
-      twist_ref{},
-      wrench_ref{},
-      pose{},
-      twist{},
-      wrench{},
-      commands{},
-      twist_selection{},
-      wrench_selection{},
-      allocation_suppressed{}
+  ControllerIOStateT()
+  :has_any_pose_ext(false),
+    has_any_twist_ext(false),
+    has_any_wrench_ext(false),
+    has_feedback(false),
+    has_pose_ext{},
+    has_twist_ext{},
+    has_wrench_ext{},
+    pose_ref{},
+    twist_ref{},
+    wrench_ref{},
+    pose{},
+    twist{},
+    wrench{},
+    commands{},
+    twist_selection{},
+    wrench_selection{},
+    allocation_suppressed{}
   {}
 
   bool has_any_pose_ext;
@@ -96,14 +97,14 @@ struct ControllerIOStateT
 /**
  * Derived data that should not be deep-copied every step.
  */
-template <size_t Dim>
+template<size_t Dim>
 struct ControllerIOErrorT
 {
-  ControllerIOErrorT() :
-      pose_error{},
-      twist_error{},
-      wrench_error{},
-      pose_error_body{}
+  ControllerIOErrorT()
+  :pose_error{},
+    twist_error{},
+    wrench_error{},
+    pose_error_body{}
   {}
 
   std::array<FP_TYPE, Dim> pose_error;
@@ -113,7 +114,7 @@ struct ControllerIOErrorT
 
 };
 
-template <size_t Dim>
+template<size_t Dim>
 struct ControllerIOT
 {
   using State = ControllerIOStateT<Dim>;
@@ -124,178 +125,191 @@ struct ControllerIOT
 };
 
 
-
 struct FixedSizeString
 {
-    constexpr static size_t MAX_LEN = 32;
-    std::array<char, MAX_LEN> data_;
+  constexpr static size_t MAX_LEN = 32;
+  std::array<char, MAX_LEN> data_;
 
-    FixedSizeString() : data_{} {}
+  FixedSizeString()
+  : data_{} {}
 
-    FixedSizeString(std::string_view str) : data_{}
-    {
-        size_t len = std::min(str.size(), data_.size() - 1);
-        std::copy_n(str.data(), len, data_.begin());
-        data_[len] = '\0';
-    }
+  FixedSizeString(std::string_view str)
+  : data_{}
+  {
+    size_t len = std::min(str.size(), data_.size() - 1);
+    std::copy_n(str.data(), len, data_.begin());
+    data_[len] = '\0';
+  }
 
-    void fill(std::string_view str)
-    {
-        size_t len = std::min(str.size(), data_.size() - 1);
-        std::copy_n(str.data(), len, data_.begin());
-        data_[len] = '\0';
-    }
+  void fill(std::string_view str)
+  {
+    size_t len = std::min(str.size(), data_.size() - 1);
+    std::copy_n(str.data(), len, data_.begin());
+    data_[len] = '\0';
+  }
 
-    void fill(char c)
-    {
-        std::fill(data_.begin(), data_.end(), c);
-        data_[data_.size() - 1] = '\0';
-    }
+  void fill(char c)
+  {
+    std::fill(data_.begin(), data_.end(), c);
+    data_[data_.size() - 1] = '\0';
+  }
 
-    size_t size() const
-    {
-        return std::string_view(data_.data()).size();
-    }
+  size_t size() const
+  {
+    return std::string_view(data_.data()).size();
+  }
 
-    std::string_view view() const
-    {
-        return std::string_view(data_.data());
-    }
+  std::string_view view() const
+  {
+    return std::string_view(data_.data());
+  }
 
-    std::array<char, MAX_LEN>::iterator begin() { return data_.begin(); }
-    std::array<char, MAX_LEN>::iterator end() { return data_.end(); }
+  std::array<char, MAX_LEN>::iterator begin() {return data_.begin();}
+  std::array<char, MAX_LEN>::iterator end() {return data_.end();}
 
-    bool is_empty() const
-    {
-        return data_[0] == '\0';
-    }
+  bool is_empty() const
+  {
+    return data_[0] == '\0';
+  }
 
-    std::string to_string() const
-    {
-        return std::string(data_.data());
-    }
+  std::string to_string() const
+  {
+    return std::string(data_.data());
+  }
 
-    bool operator==(const FixedSizeString& other) const {
-        return std::string_view(data_.data()) == std::string_view(other.data_.data());
-    }
+  bool operator==(const FixedSizeString & other) const
+  {
+    return std::string_view(data_.data()) == std::string_view(other.data_.data());
+  }
 
-    bool operator!=(const FixedSizeString& other) const {
-        return !(*this == other);
-    }
+  bool operator!=(const FixedSizeString & other) const
+  {
+    return !(*this == other);
+  }
 };
 
 struct Identity
 {
-    FixedSizeString token;
-    FixedSizeString name;
+  FixedSizeString token;
+  FixedSizeString name;
 
-    Identity() : token{}, name{}
-    {
-        token.fill('\0');
-        name.fill('\0');
-    }
+  Identity()
+  : token{}, name{}
+  {
+    token.fill('\0');
+    name.fill('\0');
+  }
 
-    Identity(const FixedSizeString& token, const FixedSizeString& name)
-        : token{token}, name{name} {}
+  Identity(const FixedSizeString & token, const FixedSizeString & name)
+  : token{token}, name{name} {}
 
-    static void get_random_identity(
-        const FixedSizeString& name, std::string_view prefix, Identity& out_identity)
-    {
-        out_identity.name = name;
-        out_identity.token.fill('\0');
+  static void get_random_identity(
+    const FixedSizeString & name, std::string_view prefix, Identity & out_identity)
+  {
+    out_identity.name = name;
+    out_identity.token.fill('\0');
 
-        const size_t prefix_length = std::min(
+    const size_t prefix_length = std::min(
             prefix.size(), out_identity.token.data_.size() - 1);
-        std::copy_n(prefix.data(), prefix_length,
+    std::copy_n(prefix.data(), prefix_length,
             out_identity.token.begin());
 
         // Identity tokens gate control authority. A 40,000-value rand()
         // sequence was both predictable and prone to collisions.
-        static constexpr char hex_digits[] = "0123456789abcdef";
-        std::random_device random_device;
-        for (size_t i = prefix_length;
-             i < out_identity.token.data_.size() - 1; ++i)
-        {
-            out_identity.token.begin()[i] =
-                hex_digits[random_device() % (sizeof(hex_digits) - 1)];
-        }
-        out_identity.token.begin()[out_identity.token.data_.size() - 1] = '\0';
-
-    }
-
-    bool is_set() const
+    static constexpr char hex_digits[] = "0123456789abcdef";
+    std::random_device random_device;
+    for (size_t i = prefix_length;
+      i < out_identity.token.data_.size() - 1; ++i)
     {
-        return !token.view().empty();
+      out_identity.token.begin()[i] =
+        hex_digits[random_device() % (sizeof(hex_digits) - 1)];
     }
+    out_identity.token.begin()[out_identity.token.data_.size() - 1] = '\0';
+
+  }
+
+  bool is_set() const
+  {
+    return !token.view().empty();
+  }
 };
 
 
-[[maybe_unused]] inline constexpr DOF operator|(DOF a, DOF b) {
+[[maybe_unused]] inline constexpr DOF operator|(DOF a, DOF b)
+{
   return static_cast<DOF>(static_cast<int>(a) | static_cast<int>(b));
 }
 
-[[maybe_unused]] inline constexpr DOF operator&(DOF a, DOF b) {
+[[maybe_unused]] inline constexpr DOF operator&(DOF a, DOF b)
+{
   return static_cast<DOF>(static_cast<int>(a) & static_cast<int>(b));
 }
 
-[[maybe_unused]] inline constexpr DOF operator|=(DOF& a, DOF b) {
+[[maybe_unused]] inline constexpr DOF operator|=(DOF & a, DOF b)
+{
   return a = a | b;
 }
 
-[[maybe_unused]] inline constexpr DOF operator&=(DOF& a, DOF b) {
+[[maybe_unused]] inline constexpr DOF operator&=(DOF & a, DOF b)
+{
   return a = a & b;
 }
 
-[[maybe_unused]] inline constexpr DOF operator~(DOF a) {
+[[maybe_unused]] inline constexpr DOF operator~(DOF a)
+{
   return static_cast<DOF>(~static_cast<int>(a));
 }
 
 
-
-template <size_t Dim>
+template<size_t Dim>
 inline constexpr DOF get_dof_by_index(int i)
 {
-    if constexpr (Dim == 6)
-    {
-        return static_cast<DOF>(1 << i);
+  if constexpr (Dim == 6) {
+    return static_cast<DOF>(1 << i);
+  } else if constexpr (Dim == 3) {
+    switch (i) {
+      case 0: return DOF_X;
+      case 1: return DOF_Y;
+      case 2: return DOF_N;
+      default: return NO_DOF;
     }
-    else if constexpr (Dim == 3)
-    {
-        switch (i)
-        {
-            case 0: return DOF_X;
-            case 1: return DOF_Y;
-            case 2: return DOF_N;
-            default: return NO_DOF;
-        }
-    }
-    else
-    {
-        static_assert(Dim == 3 || Dim == 6, "Dim must be either 3 or 6");
-    }
-    return NO_DOF;
+  } else {
+    static_assert(Dim == 3 || Dim == 6, "Dim must be either 3 or 6");
+  }
+  return NO_DOF;
 }
 
-[[maybe_unused]] inline constexpr bool is_dof_angular(DOF dof) { return dof & (DOF_K | DOF_M | DOF_N); }
-[[maybe_unused]] inline constexpr bool is_dof_linear(DOF dof) { return dof & (DOF_X | DOF_Y | DOF_Z); }
+[[maybe_unused]] inline constexpr bool is_dof_angular(DOF dof)
+{
+  return dof & (DOF_K | DOF_M | DOF_N);
+}
+[[maybe_unused]] inline constexpr bool is_dof_linear(DOF dof)
+{
+  return dof & (DOF_X | DOF_Y | DOF_Z);
+}
 
-template <size_t Dim>
-inline constexpr bool is_dof_angular(int i) { return get_dof_by_index<Dim>(i) & (DOF_K | DOF_M | DOF_N); }
+template<size_t Dim>
+inline constexpr bool is_dof_angular(int i)
+{
+  return get_dof_by_index<Dim>(i) & (DOF_K | DOF_M | DOF_N);
+}
 
-template <size_t Dim>
-inline constexpr bool is_dof_linear(int i) { return get_dof_by_index<Dim>(i) & (DOF_X | DOF_Y | DOF_Z); }
+template<size_t Dim>
+inline constexpr bool is_dof_linear(int i)
+{
+  return get_dof_by_index<Dim>(i) & (DOF_X | DOF_Y | DOF_Z);
+}
 
-[[maybe_unused]] static DOF get_dof_by_name(const std::string& dof)
+[[maybe_unused]] static DOF get_dof_by_name(const std::string & dof)
 {
 
   std::string lowercase(dof);
   std::transform(lowercase.begin(), lowercase.end(), lowercase.begin(),
-      [](unsigned char c){ return std::tolower(c); }
+    [](unsigned char c){return std::tolower(c);}
   );
 
   auto itr = std::find(DOF_NAMES.begin(), DOF_NAMES.end(), lowercase);
-  if (itr == DOF_NAMES.end())
-  {
+  if (itr == DOF_NAMES.end()) {
     return NO_DOF;
   }
 
@@ -304,11 +318,10 @@ inline constexpr bool is_dof_linear(int i) { return get_dof_by_index<Dim>(i) & (
   return static_cast<DOF>(get_dof_by_index<6>(idx));
 }
 
-[[maybe_unused]] static DOF get_dofs_by_name(const std::vector<std::string>& names)
+[[maybe_unused]] static DOF get_dofs_by_name(const std::vector<std::string> & names)
 {
   auto ret_dofs = 0;
-  for (const auto& name : names)
-  {
+  for (const auto & name : names) {
     ret_dofs |= get_dof_by_name(name);
   }
   return static_cast<DOF>(ret_dofs);
@@ -317,10 +330,8 @@ inline constexpr bool is_dof_linear(int i) { return get_dof_by_index<Dim>(i) & (
 [[maybe_unused]] static std::vector<std::string> get_dof_names(DOF dof)
 {
   std::vector<std::string> ret_dofs;
-  for (int i = 0; i < DOF_END_i; ++i)
-  {
-    if (get_dof_by_index<6>(i) & dof)
-    {
+  for (int i = 0; i < DOF_END_i; ++i) {
+    if (get_dof_by_index<6>(i) & dof) {
       ret_dofs.push_back(DOF_NAMES[i]);
     }
   }

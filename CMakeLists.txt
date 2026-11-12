@@ -79,7 +79,6 @@ if(BUILD_TESTING)
 
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
-  ament_lint_auto_find_test_dependencies()
 
 
   ament_add_gtest(test_command_types tests/command_types_tests.cpp)
@@ -111,10 +110,10 @@ if(BUILD_TESTING)
 
   # copy test data to build directory
   add_custom_target(copy_test_directory ALL
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
-            "${CMAKE_CURRENT_BINARY_DIR}/tests/data"
-    )
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
+      "${CMAKE_CURRENT_BINARY_DIR}/tests/data"
+  )
 
   add_dependencies(test_motion_controller copy_test_directory)
   add_dependencies(test_controller_lifecycle copy_test_directory)
