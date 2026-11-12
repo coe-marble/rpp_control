@@ -6,7 +6,7 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
+  set(CMAKE_CXX_STANDARD 20)
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -14,6 +14,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(ament_cmake REQUIRED)
 find_package(rpp_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(rcl_interfaces REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
@@ -27,10 +29,13 @@ find_package(marble_control_msgs REQUIRED)
 add_library(rpp_control SHARED
   src/motion_controller_ros.cpp
 )
+target_compile_features(rpp_control PUBLIC cxx_std_20)
 target_link_libraries(rpp_control
   PUBLIC
   rclcpp::rclcpp
   rpp_cpp::rpp_cpp
+  ${rcl_interfaces_TARGETS}
+  ${builtin_interfaces_TARGETS}
   ${geometry_msgs_TARGETS}
   ${std_msgs_TARGETS}
   ${std_srvs_TARGETS}
@@ -77,12 +82,26 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 
 
+  ament_add_gtest(test_command_types tests/command_types_tests.cpp)
+  target_include_directories(test_command_types PRIVATE include)
+  target_link_libraries(test_command_types ${geometry_msgs_TARGETS})
+
+  ament_add_gtest(test_command_age_filter tests/command_age_filter_tests.cpp)
+  target_compile_features(test_command_age_filter PRIVATE cxx_std_20)
+  target_include_directories(test_command_age_filter PRIVATE include)
+  target_link_libraries(test_command_age_filter
+    rclcpp::rclcpp ${rcl_interfaces_TARGETS} ${builtin_interfaces_TARGETS} ${geometry_msgs_TARGETS})
+
   ament_add_gtest(test_motion_controller tests/motion_controller_tests.cpp)
 
   target_include_directories(test_motion_controller PRIVATE include)
   target_link_libraries(test_motion_controller
     rpp_control
   )
+
+  ament_add_gtest(test_controller_lifecycle tests/controller_lifecycle_tests.cpp)
+  target_include_directories(test_controller_lifecycle PRIVATE include)
+  target_link_libraries(test_controller_lifecycle rpp_control)
 
   ament_add_gtest(
     test_waterjet_allocator_safety
@@ -98,6 +117,7 @@ if(BUILD_TESTING)
     )
 
   add_dependencies(test_motion_controller copy_test_directory)
+  add_dependencies(test_controller_lifecycle copy_test_directory)
   add_dependencies(test_waterjet_allocator_safety copy_test_directory)
 
 

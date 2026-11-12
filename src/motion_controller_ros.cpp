@@ -161,6 +161,7 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
     : Node("motion_controller", options),
         logger_(std::make_shared<rpp::RppLogger>(this->get_logger().get_name())),
         controller_(std::monostate{}),
+        command_age_filter_(*this),
         debug_snapshot_throttle_(std::chrono::milliseconds(500))
 {
     using std::placeholders::_1;
@@ -168,6 +169,8 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
     RPP_LOG_INFO(*logger_, "MotionControllerRos node has been started.");
 
     std::string type = this->declare_parameter("controller_type", "2D");
+    const bool activate_on_start = this->declare_parameter<bool>(
+        "controller.activate_on_start", true);
 
     const std::string rpp_workspace = this->declare_parameter(
         "rpp_workspace", "");
@@ -177,16 +180,24 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
     }
 
     MotionController2DImpl::Options controller_2d_options{};
+    MotionController3DImpl::Options controller_3d_options{};
     if (type == "2D")
     {
         controller_2d_options = create_controller_2d_options_();
+        controller_2d_options.activate_on_start = activate_on_start;
+    }
+    else if (type == "3D")
+    {
+        controller_3d_options.activate_on_start = activate_on_start;
     }
 
     rpp::RppDataManager data_manager(rpp::RPP_HOME, rpp_workspace);
-    rpp::ComponentContextBuilder context_builder(data_manager);
-    context_ = std::make_unique<rpp::ComponentContext>(
-        context_builder.build_script_from_library(
-            "rpp_control", "motion_controller2d_impl"));
+    rpp::ComponentRuntimeBuilder runtime_builder(data_manager);
+    runtime_ = std::make_unique<rpp::ScriptRuntime<>>(
+        runtime_builder.build_script({
+            rpp::LibraryScript{"rpp_control", "motion_controller2d_impl"}, {}, {}}));
+    runtime_->configure().require_success("Motion controller configuration");
+    context_ = &runtime_->get_context();
 
     if (type == "2D")
     {
@@ -195,7 +206,8 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
     }
     else if (type == "3D")
     {
-        controller_.emplace<MotionController3DImpl>(*context_);
+        controller_.emplace<MotionController3DImpl>(
+            *context_, std::move(controller_3d_options));
     }
     else
     {
@@ -207,7 +219,7 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
         using Controller = std::decay_t<decltype(controller)>;
         if constexpr (!std::is_same_v<Controller, std::monostate>)
         {
-            controller.initialize();
+            controller.configure();
         }
     }, controller_);
 
@@ -285,15 +297,15 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
 
     if (expose_developer_topics)
     {
-        pose_ref_sub_dev_ = create_subscription<Pose>(
+        pose_ref_sub_dev_ = create_subscription<CmdPose>(
             "cmd_pos", 1,
             std::bind(&MotionControllerRos::on_external_pose_dev_, this, _1));
 
-        twist_ref_sub_dev_ = create_subscription<Twist>(
+        twist_ref_sub_dev_ = create_subscription<CmdTwist>(
             "cmd_vel", 1,
             std::bind(&MotionControllerRos::on_external_twist_dev_, this, _1));
 
-        wrench_ref_sub_dev_ = create_subscription<Wrench>(
+        wrench_ref_sub_dev_ = create_subscription<CmdWrench>(
             "cmd_tau", 1,
             std::bind(&MotionControllerRos::on_external_wrench_dev_, this, _1));
     }
@@ -705,17 +717,24 @@ void MotionControllerRos::on_navigation_status_(
 
 
 void MotionControllerRos::on_external_pose_dev_(
-    Pose::SharedPtr msg)
+    CmdPose::SharedPtr msg)
 {
+    if (!command_age_filter_.accepts(CommandTopics::stamp(*msg), this->now()))
+    {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+            "Discarding stale or invalid stamped command on cmd_pos.");
+        return;
+    }
+    const auto& command = CommandTopics::pose(*msg);
     double euler_x, euler_y, euler_z;
     std::tie(euler_x, euler_y, euler_z) = quat2euler(
-        msg->orientation.x, msg->orientation.y,
-        msg->orientation.z, msg->orientation.w);
+        command.orientation.x, command.orientation.y,
+        command.orientation.z, command.orientation.w);
 
     std::array<FP_TYPE, 6> data_3d{
-        static_cast<FP_TYPE>(msg->position.x),
-        static_cast<FP_TYPE>(msg->position.y),
-        static_cast<FP_TYPE>(msg->position.z),
+        static_cast<FP_TYPE>(command.position.x),
+        static_cast<FP_TYPE>(command.position.y),
+        static_cast<FP_TYPE>(command.position.z),
         static_cast<FP_TYPE>(euler_x),
         static_cast<FP_TYPE>(euler_y),
         static_cast<FP_TYPE>(euler_z)
@@ -747,15 +766,22 @@ void MotionControllerRos::on_external_pose_dev_(
 
 
 void MotionControllerRos::on_external_twist_dev_(
-    Twist::SharedPtr msg)
+    CmdTwist::SharedPtr msg)
 {
+    if (!command_age_filter_.accepts(CommandTopics::stamp(*msg), this->now()))
+    {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+            "Discarding stale or invalid stamped command on cmd_vel.");
+        return;
+    }
+    const auto& command = CommandTopics::twist(*msg);
     std::array<FP_TYPE, 6> data_3d{
-        static_cast<FP_TYPE>(msg->linear.x),
-        static_cast<FP_TYPE>(msg->linear.y),
-        static_cast<FP_TYPE>(msg->linear.z),
-        static_cast<FP_TYPE>(msg->angular.x),
-        static_cast<FP_TYPE>(msg->angular.y),
-        static_cast<FP_TYPE>(msg->angular.z)
+        static_cast<FP_TYPE>(command.linear.x),
+        static_cast<FP_TYPE>(command.linear.y),
+        static_cast<FP_TYPE>(command.linear.z),
+        static_cast<FP_TYPE>(command.angular.x),
+        static_cast<FP_TYPE>(command.angular.y),
+        static_cast<FP_TYPE>(command.angular.z)
     };
     const auto& mask_3d = std::array<bool, 6>{
         true, true, true, true, true, true
@@ -782,15 +808,22 @@ void MotionControllerRos::on_external_twist_dev_(
 }
 
 void MotionControllerRos::on_external_wrench_dev_(
-    Wrench::SharedPtr msg)
+    CmdWrench::SharedPtr msg)
 {
+    if (!command_age_filter_.accepts(CommandTopics::stamp(*msg), this->now()))
+    {
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+            "Discarding stale or invalid stamped command on cmd_tau.");
+        return;
+    }
+    const auto& command = CommandTopics::wrench(*msg);
     std::array<FP_TYPE, 6> data_3d{
-        static_cast<FP_TYPE>(msg->force.x),
-        static_cast<FP_TYPE>(msg->force.y),
-        static_cast<FP_TYPE>(msg->force.z),
-        static_cast<FP_TYPE>(msg->torque.x),
-        static_cast<FP_TYPE>(msg->torque.y),
-        static_cast<FP_TYPE>(msg->torque.z)
+        static_cast<FP_TYPE>(command.force.x),
+        static_cast<FP_TYPE>(command.force.y),
+        static_cast<FP_TYPE>(command.force.z),
+        static_cast<FP_TYPE>(command.torque.x),
+        static_cast<FP_TYPE>(command.torque.y),
+        static_cast<FP_TYPE>(command.torque.z)
     };
     const auto& mask_3d = std::array<bool, 6>{
         true, true, true, true, true, true

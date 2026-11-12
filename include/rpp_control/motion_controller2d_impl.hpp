@@ -101,14 +101,11 @@ namespace rpp_control {
             return true;
         }
 
-        static void parse_output_message(OutputMessage::Const ref_message,
+        static void parse_output_message(
             const std::tuple<Command::Const, OutputMessage::Const>& out_commands,
-            std::array<FP_TYPE, 3>& wrench_ref, std::array<FP_TYPE, 3>& wrench,
+            std::array<FP_TYPE, 3>& wrench,
             std::vector<FP_TYPE>& commands)
         {
-            wrench_ref[0] = ref_message.force().x();
-            wrench_ref[1] = ref_message.force().y();
-            wrench_ref[2] = ref_message.torque();
             wrench[0] = std::get<1>(out_commands).force().x();
             wrench[1] = std::get<1>(out_commands).force().y();
             wrench[2] = std::get<1>(out_commands).torque();
@@ -168,18 +165,8 @@ namespace rpp_control {
 
             explicit MotionController2DImpl(const rpp::ComponentContext& context,
                 Options options = {})
-                : MotionControllerT<MotionController2DTraits>(context),
-                  options_(std::move(options))
+                : Base(context, std::move(options))
             {
             }
-
-        protected:
-            void configure() override
-            {
-                Base::configure(options_);
-            }
-
-        private:
-            Options options_;
     };
 }

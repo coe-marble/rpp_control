@@ -8,6 +8,8 @@
   <license>TODO: License declaration</license>
 
   <depend>rclcpp</depend>
+  <depend>rcl_interfaces</depend>
+  <depend>builtin_interfaces</depend>
   <depend>rpp_cpp</depend>
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>

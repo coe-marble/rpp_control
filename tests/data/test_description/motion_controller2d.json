@@ -19,5 +19,9 @@
             }
         }
     },
-    "ActiveConfiguration": "Default"
+    "ActiveConfiguration": "Default",
+    "Spec": {
+        "controller": "rpp_control::MotionController2D",
+        "allocator": "rpp_control::MotionControllerAllocator2D"
+    }
 }

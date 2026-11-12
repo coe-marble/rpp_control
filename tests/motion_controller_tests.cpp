@@ -1,7 +1,9 @@
 #include "gtest/gtest.h"
 #include "rpp_control/motion_controller2d_impl.hpp"
 #include "rpp_control/motion_controller3d_impl.hpp"
-#include "rpp_cpp/context_builder.hpp"
+#include "rpp_cpp/component_runtime_builder.hpp"
+
+#include <stdexcept>
 
 
 class TestMotionController : public ::testing::Test {
@@ -22,6 +24,29 @@ protected:
         // std::filesystem::remove_all(tmp_dir);
     }
 
+    static rpp::ScriptRuntime<> build_runtime()
+    {
+        rpp::RppDataManager data_manager(rpp::RPP_HOME);
+        rpp::ComponentRuntimeBuilder builder(
+            data_manager, rpp::ClockOptions(rpp::RPP_CLOCK_MOCK));
+        return builder.build_script({
+            rpp::ScriptDescriptionPath{
+                test_data_dir + "/test_description/motion_controller2d.json"},
+            std::nullopt, test_data_dir + "/test_ws_parts"});
+    }
+
+    static std::shared_ptr<rpp::RppClockMock> mock_clock(
+        const rpp::ComponentContext& context)
+    {
+        auto read_only_clock = std::dynamic_pointer_cast<const rpp::RppClockMock>(
+            context.get_clock());
+        if (!read_only_clock) {
+            throw std::runtime_error("Test runtime did not create a mock clock");
+        }
+        return std::const_pointer_cast<rpp::RppClockMock>(
+            std::move(read_only_clock));
+    }
+
 };
 
 std::string TestMotionController::test_data_dir = "";
@@ -29,13 +54,11 @@ bool TestMotionController::initialization_successful = false;
 
 TEST_F(TestMotionController, TestInstance2DAndSetReferences) {
 
-    auto context = rpp::ComponentContextBuilder(rpp::RPP_CLOCK_MOCK)
-        .build_script_from_description_path(
-            test_data_dir + "/test_description/motion_controller2d.json",
-            std::nullopt,
-            test_data_dir + "/test_ws_parts");
+    auto runtime = build_runtime();
+    ASSERT_TRUE(runtime.configure().success);
+    const auto& context = runtime.get_context();
 
-    auto clock = std::dynamic_pointer_cast<rpp::RppClockMock>(context.get_clock());
+    auto clock = mock_clock(context);
 
     clock->set_time(100.0);
 
@@ -109,13 +132,11 @@ TEST_F(TestMotionController, TestInstance2DAndSetReferences) {
 }
 
 TEST_F(TestMotionController, TestInstance2DAndStep) {
-    auto context = rpp::ComponentContextBuilder(rpp::RPP_CLOCK_MOCK)
-        .build_script_from_description_path(
-            test_data_dir + "/test_description/motion_controller2d.json",
-            std::nullopt,
-            test_data_dir + "/test_ws_parts");
+    auto runtime = build_runtime();
+    ASSERT_TRUE(runtime.configure().success);
+    const auto& context = runtime.get_context();
 
-    auto clock = std::dynamic_pointer_cast<rpp::RppClockMock>(context.get_clock());
+    auto clock = mock_clock(context);
     clock->set_time(100.0);
 
     auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(context);
@@ -123,9 +144,9 @@ TEST_F(TestMotionController, TestInstance2DAndStep) {
     EXPECT_TRUE(controller_2d != nullptr);
 
     bool step_result = controller_2d->step(0.01);
-    EXPECT_FALSE(step_result); // Not initialized yet.
+    EXPECT_FALSE(step_result); // Not configured yet.
 
-    controller_2d->initialize();
+    controller_2d->configure();
 
     step_result = controller_2d->step(0.01);
     EXPECT_FALSE(step_result); // No feedback received.
@@ -164,9 +185,9 @@ TEST_F(TestMotionController, TestInstance2DAndStep) {
     EXPECT_NEAR(state.twist_ref[0], 0.0, EPSILON);
     EXPECT_NEAR(state.twist_ref[1], 0.0, EPSILON);
     EXPECT_NEAR(state.twist_ref[2], 0.0, EPSILON);
-    EXPECT_TRUE(state.wrench_ref[0] != 0.0);
-    EXPECT_TRUE(state.wrench_ref[1] != 0.0);
-    EXPECT_TRUE(state.wrench_ref[2] != 0.0);
+    EXPECT_NEAR(state.wrench_ref[0], 0.0, EPSILON);
+    EXPECT_NEAR(state.wrench_ref[1], 0.0, EPSILON);
+    EXPECT_NEAR(state.wrench_ref[2], 0.0, EPSILON);
 
     EXPECT_NEAR(state.pose[0], 1.0, EPSILON);
     EXPECT_NEAR(state.pose[1], 2.0, EPSILON);
@@ -183,15 +204,26 @@ TEST_F(TestMotionController, TestInstance2DAndStep) {
     EXPECT_TRUE(state.commands[1] != 0.0);
 }
 
-TEST_F(TestMotionController, TestAllocationFeedbackSuppressesConflictingAxis) {
-    auto context = rpp::ComponentContextBuilder(rpp::RPP_CLOCK_MOCK)
-        .build_script_from_description_path(
-            test_data_dir + "/test_description/motion_controller2d.json",
-            std::nullopt,
-            test_data_dir + "/test_ws_parts");
+TEST_F(TestMotionController, ConfigureCanLeaveChildComponentsInactive) {
+    auto runtime = build_runtime();
+    ASSERT_TRUE(runtime.configure().success);
+    const auto& context = runtime.get_context();
 
-    auto clock = std::dynamic_pointer_cast<rpp::RppClockMock>(
-        context.get_clock());
+    rpp_control::MotionController2DImpl::Options options{};
+    options.activate_on_start = false;
+    rpp_control::MotionController2DImpl controller(context, options);
+    controller.configure();
+
+    EXPECT_FALSE(context.get_subcomponent_context("controller").is_active());
+    EXPECT_FALSE(context.get_subcomponent_context("allocator").is_active());
+}
+
+TEST_F(TestMotionController, TestAllocationFeedbackSuppressesConflictingAxis) {
+    auto runtime = build_runtime();
+    ASSERT_TRUE(runtime.configure().success);
+    const auto& context = runtime.get_context();
+
+    auto clock = mock_clock(context);
     clock->set_time(100.0);
 
     auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(
@@ -201,7 +233,7 @@ TEST_F(TestMotionController, TestAllocationFeedbackSuppressesConflictingAxis) {
     allocation_suppression.priority_dof = rpp_control::DOF_N;
     allocation_suppression.suppressed_dof = rpp_control::DOF_X;
     controller_2d->set_allocation_suppression(allocation_suppression);
-    controller_2d->initialize();
+    controller_2d->configure();
     controller_2d->set_feedback({1.0, 2.0, 3.0}, {0.1, 0.2, 0.3});
     controller_2d->set_current_wrench_ref(
         {3000.0, 0.0, 3000.0}, {true, false, true});
@@ -223,14 +255,11 @@ TEST_F(TestMotionController, TestAllocationFeedbackSuppressesConflictingAxis) {
 }
 
 TEST_F(TestMotionController, TestZeroSurgeCommandSuppressesSurgeForYawRate) {
-    auto context = rpp::ComponentContextBuilder(rpp::RPP_CLOCK_MOCK)
-        .build_script_from_description_path(
-            test_data_dir + "/test_description/motion_controller2d.json",
-            std::nullopt,
-            test_data_dir + "/test_ws_parts");
+    auto runtime = build_runtime();
+    ASSERT_TRUE(runtime.configure().success);
+    const auto& context = runtime.get_context();
 
-    auto clock = std::dynamic_pointer_cast<rpp::RppClockMock>(
-        context.get_clock());
+    auto clock = mock_clock(context);
     clock->set_time(100.0);
 
     auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(
@@ -240,7 +269,7 @@ TEST_F(TestMotionController, TestZeroSurgeCommandSuppressesSurgeForYawRate) {
     allocation_suppression.priority_dof = rpp_control::DOF_N;
     allocation_suppression.suppressed_dof = rpp_control::DOF_X;
     controller_2d->set_allocation_suppression(allocation_suppression);
-    controller_2d->initialize();
+    controller_2d->configure();
     controller_2d->set_feedback({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
     controller_2d->set_current_twist_ref(
         {0.0, 0.0, 0.05}, {true, false, true});
@@ -262,19 +291,16 @@ TEST_F(TestMotionController, TestZeroSurgeCommandSuppressesSurgeForYawRate) {
 }
 
 TEST_F(TestMotionController, TestRequestedWrenchRateLimit) {
-    auto context = rpp::ComponentContextBuilder(rpp::RPP_CLOCK_MOCK)
-        .build_script_from_description_path(
-            test_data_dir + "/test_description/motion_controller2d.json",
-            std::nullopt,
-            test_data_dir + "/test_ws_parts");
+    auto runtime = build_runtime();
+    ASSERT_TRUE(runtime.configure().success);
+    const auto& context = runtime.get_context();
 
-    auto clock = std::dynamic_pointer_cast<rpp::RppClockMock>(
-        context.get_clock());
+    auto clock = mock_clock(context);
     clock->set_time(100.0);
 
     auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(
         context);
-    controller_2d->initialize();
+    controller_2d->configure();
     controller_2d->set_wrench_rate_limits({1000.0, 0.0, 0.0});
     controller_2d->set_feedback({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
     controller_2d->set_current_wrench_ref(
@@ -287,23 +313,22 @@ TEST_F(TestMotionController, TestRequestedWrenchRateLimit) {
     EXPECT_TRUE(controller_2d->step(0.1));
     auto state = rpp_control::MotionController2DImpl::ControllerIO::State{};
     controller_2d->get_live_state(state);
-    EXPECT_NEAR(state.wrench_ref[0], 100.0, EPSILON);
+    EXPECT_NEAR(state.wrench_ref[0], 6000.0, EPSILON);
+    EXPECT_NEAR(state.wrench[0], 100.0, EPSILON);
 
     clock->elapse(0.1);
     EXPECT_TRUE(controller_2d->step(0.1));
     controller_2d->get_live_state(state);
-    EXPECT_NEAR(state.wrench_ref[0], 200.0, EPSILON);
+    EXPECT_NEAR(state.wrench_ref[0], 6000.0, EPSILON);
+    EXPECT_NEAR(state.wrench[0], 200.0, EPSILON);
 }
 
 TEST_F(TestMotionController, TestSuppressedSurgeDoesNotReverseYawWrench) {
-    auto context = rpp::ComponentContextBuilder(rpp::RPP_CLOCK_MOCK)
-        .build_script_from_description_path(
-            test_data_dir + "/test_description/motion_controller2d.json",
-            std::nullopt,
-            test_data_dir + "/test_ws_parts");
+    auto runtime = build_runtime();
+    ASSERT_TRUE(runtime.configure().success);
+    const auto& context = runtime.get_context();
 
-    auto clock = std::dynamic_pointer_cast<rpp::RppClockMock>(
-        context.get_clock());
+    auto clock = mock_clock(context);
     clock->set_time(100.0);
 
     auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(
@@ -313,7 +338,7 @@ TEST_F(TestMotionController, TestSuppressedSurgeDoesNotReverseYawWrench) {
     allocation_suppression.priority_dof = rpp_control::DOF_N;
     allocation_suppression.suppressed_dof = rpp_control::DOF_X;
     controller_2d->set_allocation_suppression(allocation_suppression);
-    controller_2d->initialize();
+    controller_2d->configure();
     controller_2d->set_feedback({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
     controller_2d->set_current_twist_ref(
         {0.0, 0.0, 0.1}, {false, false, true});
@@ -340,7 +365,8 @@ TEST_F(TestMotionController, TestSuppressedSurgeDoesNotReverseYawWrench) {
     auto state = rpp_control::MotionController2DImpl::ControllerIO::State{};
     controller_2d->get_live_state(state);
     EXPECT_TRUE(state.allocation_suppressed[0]);
-    EXPECT_NEAR(state.wrench_ref[2], 0.0, EPSILON);
+    EXPECT_NEAR(state.wrench_ref[2], -3000.0, EPSILON);
+    EXPECT_NEAR(state.wrench[2], 0.0, EPSILON);
 }
 
 int main(int argc, char **argv) {

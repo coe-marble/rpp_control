@@ -1,0 +1,55 @@
+name: Library CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Library tests
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    container:
+      image: ghcr.io/coe-marble/rpp-test-container:lyrical-ubuntu26.04-capnp1.1.0-v1
+    defaults:
+      run:
+        shell: bash
+    env:
+      ROS_DISTRO: lyrical
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - name: Check out repository under test
+        uses: actions/checkout@v4
+        with:
+          path: libraries/rpp_control
+          persist-credentials: false
+      - name: Check out RPP integration dependencies
+        uses: actions/checkout@v4
+        with:
+          repository: coe-marble/rpp_dev
+          ref: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          path: rpp_dev
+          submodules: recursive
+          token: ${{ secrets.RPP_CI_TOKEN || github.token }}
+          persist-credentials: false
+      - name: Check out control message definitions
+        uses: actions/checkout@v4
+        with:
+          repository: coe-marble/marble_control_msgs
+          ref: main
+          path: libraries/marble_control_msgs
+          persist-credentials: false
+      - name: Run library CI
+        run: bash libraries/rpp_control/.github/scripts/ci.sh

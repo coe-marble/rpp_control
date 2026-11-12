@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <stdexcept>
 #include <tuple>
 #include <utility>
@@ -26,7 +27,7 @@ public:
         ParameterDescription::create<double>("max_safe_roll_deg", 30.0)
     )
 
-    void initialize(const rpp::ComponentContext& context) override
+    rpp::CallbackResult on_configure(const rpp::ComponentContext& context) override
     {
         jet_x_ = context.get_parameter<double>("jet_x");
         jet_y_ = context.get_parameter<double>("jet_y");
@@ -38,6 +39,21 @@ public:
         max_safe_roll_rad_ = context.get_parameter<double>("max_safe_roll_deg")
             * kPi / 180.0;
         validate_configuration();
+        return {};
+    }
+
+    rpp::CallbackResult on_activate(
+        const std::optional<HandoverState::Const> &) override
+    {
+        // The current allocator is configuration-only. Future allocators can
+        // restore rate-limit or optimizer state from AllocatorHandoverState.
+        return {};
+    }
+
+    rpp::DeactivationResult<HandoverState::Const> on_deactivate() override
+    {
+        HandoverState handover;
+        return {{}, HandoverState::Const(std::move(handover))};
     }
 
     std::tuple<Command::Const, Wrench2D::Const> allocate(

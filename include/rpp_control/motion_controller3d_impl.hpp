@@ -2,6 +2,8 @@
 
 #include "motion_controller.hpp"
 
+#include <utility>
+
 #include <rpp_plugin_types/rpp_control/MotionController3D.hpp>
 #include <rpp_plugin_types/rpp_control/MotionControllerAllocator3D.hpp>
 #include <rpp_schema/rpp_control/EnablerOdometry3D.hpp>
@@ -131,18 +133,10 @@ namespace rpp_control {
         }
 
         static void parse_output_message(
-            OutputMessage::Const ref_message,
             const std::tuple<Command::Const, OutputMessage::Const>& out_commands,
-            std::array<FP_TYPE, 6>& wrench_ref,
             std::array<FP_TYPE, 6>& wrench,
             std::vector<FP_TYPE>& commands)
         {
-            wrench_ref[0] = ref_message.force().x();
-            wrench_ref[1] = ref_message.force().y();
-            wrench_ref[2] = ref_message.force().z();
-            wrench_ref[3] = ref_message.torque().x();
-            wrench_ref[4] = ref_message.torque().y();
-            wrench_ref[5] = ref_message.torque().z();
             wrench[0] = std::get<1>(out_commands).force().x();
             wrench[1] = std::get<1>(out_commands).force().y();
             wrench[2] = std::get<1>(out_commands).force().z();
@@ -200,15 +194,18 @@ namespace rpp_control {
     class MotionController3DImpl final : public MotionControllerT<MotionController3DTraits>
     {
         public:
+            using Base = MotionControllerT<MotionController3DTraits>;
+            using Options = Base::Options;
+
             RPP_COMPONENTS(
                 {"controller", "rpp_control::MotionController3D"},
                 {"allocator", "rpp_control::MotionControllerAllocator3D"}
             )
 
-            explicit MotionController3DImpl(const rpp::ComponentContext& context)
-                : MotionControllerT<MotionController3DTraits>(context)
+            explicit MotionController3DImpl(const rpp::ComponentContext& context,
+                Options options = {})
+                : Base(context, std::move(options))
             {
             }
-
     };
 }

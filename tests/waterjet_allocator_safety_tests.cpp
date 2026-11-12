@@ -10,7 +10,7 @@
 #include <utility>
 
 #include "gtest/gtest.h"
-#include "rpp_cpp/context_builder.hpp"
+#include "rpp_cpp/component_runtime_builder.hpp"
 #include "rpp_plugin_types/rpp_control/MotionControllerAllocator2D.hpp"
 
 namespace
@@ -52,15 +52,19 @@ double normalized_grid_value(const std::size_t index)
 TEST(WaterjetAllocatorSafety, sweeps_normalized_surge_and_yaw_grid)
 {
   const std::string data_directory = "./tests/data/waterjet_allocator_safety";
-  auto context = rpp::ComponentContextBuilder(rpp::RPP_CLOCK_MOCK)
-    .build_script_from_description_path(
-      data_directory + "/waterjet_allocator.json",
-      std::nullopt,
-      data_directory + "/parts");
-  context.initialize();
+  rpp::RppDataManager data_manager(rpp::RPP_HOME);
+  rpp::ComponentRuntimeBuilder builder(
+    data_manager, rpp::ClockOptions(rpp::RPP_CLOCK_MOCK));
+  auto runtime = builder.build_script({
+    rpp::ScriptDescriptionPath{data_directory + "/waterjet_allocator.json"},
+    std::nullopt, data_directory + "/parts"});
+  ASSERT_TRUE(runtime.configure().success);
+  const auto & context = runtime.get_context();
 
   using Allocator = rpp_control::MotionControllerAllocator2D;
-  const auto allocator = context.get_component<Allocator>("allocator");
+  const auto & allocator_context = context.get_subcomponent_context("allocator");
+  ASSERT_TRUE(allocator_context.activate().success);
+  const auto allocator = allocator_context.get_instance<Allocator>();
   ASSERT_NE(allocator, nullptr);
   EXPECT_EQ(allocator->outputSize(), 2U);
 

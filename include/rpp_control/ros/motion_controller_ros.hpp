@@ -7,11 +7,13 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <rpp_cpp/plugin.hpp>
-#include <rpp_cpp/context_builder.hpp>
+#include <rpp_cpp/component_runtime_builder.hpp>
 #include <rpp_cpp/logger.hpp>
 #include <std_srvs/srv/set_bool.hpp>
 
 #include "ros_defs.hpp"
+#include "command_types.hpp"
+#include "command_age_filter.hpp"
 #include "../utils.hpp"
 #include "../motion_controller2d_impl.hpp"
 #include "../motion_controller3d_impl.hpp"
@@ -23,7 +25,8 @@ namespace rpp_control {
 
     private:
         std::shared_ptr<rpp::RppLogger> logger_;
-        std::unique_ptr<rpp::ComponentContext> context_;
+        std::unique_ptr<rpp::ScriptRuntime<>> runtime_;
+        const rpp::ComponentContext* context_ = nullptr;
 
     public:
         MotionControllerRos(const rclcpp::NodeOptions &options = rclcpp::NodeOptions());
@@ -38,9 +41,9 @@ namespace rpp_control {
         rclcpp::Subscription<PoseReference>::SharedPtr pose_ext_sub_;
         rclcpp::Subscription<NavigationStatus>::SharedPtr navigation_status_sub_;
 
-        rclcpp::Subscription<Pose>::SharedPtr pose_ref_sub_dev_;
-        rclcpp::Subscription<Twist>::SharedPtr twist_ref_sub_dev_;
-        rclcpp::Subscription<Wrench>::SharedPtr wrench_ref_sub_dev_;
+        rclcpp::Subscription<CmdPose>::SharedPtr pose_ref_sub_dev_;
+        rclcpp::Subscription<CmdTwist>::SharedPtr twist_ref_sub_dev_;
+        rclcpp::Subscription<CmdWrench>::SharedPtr wrench_ref_sub_dev_;
 
         rclcpp::Publisher<ControlStatus>::SharedPtr status_pub_;
         rclcpp::Publisher<ControlState>::SharedPtr state_pub_;
@@ -62,9 +65,9 @@ namespace rpp_control {
         void on_external_pose_(PoseReference::SharedPtr eta_ref);
         void on_navigation_status_(NavigationStatus::SharedPtr nav_status);
 
-        void on_external_wrench_dev_(Wrench::SharedPtr wrench_ref);
-        void on_external_twist_dev_(Twist::SharedPtr twist_ref);
-        void on_external_pose_dev_(Pose::SharedPtr eta_ref);
+        void on_external_wrench_dev_(CmdWrench::SharedPtr wrench_ref);
+        void on_external_twist_dev_(CmdTwist::SharedPtr twist_ref);
+        void on_external_pose_dev_(CmdPose::SharedPtr eta_ref);
 
         void on_control_timer_();
         void publish_control_result_(bool control_active, double dt);
@@ -72,6 +75,7 @@ namespace rpp_control {
         std::chrono::steady_clock::time_point last_control_tick_;
         double max_control_dt_ = 0.0;
         double cmd_out_thrust_limit_ = 1.0;
+        CommandAgeFilter command_age_filter_;
         std::atomic_bool control_enabled_{true};
         rpp::LogThrottle debug_snapshot_throttle_;
         String debug_message_;

@@ -5,6 +5,7 @@
 
 #include <rpp_cpp/plugin.hpp>
 
+#include "controller_handover.hpp"
 #include "control_defs.hpp"
 
 
@@ -24,10 +25,10 @@ namespace rpp_control {
 
     class PID
     {
+    private:
         PIDParameters params_;
-        FP_TYPE integral_error_ = 0.0;
-        FP_TYPE previous_error_ = 0.0;
-        FP_TYPE previous_derivative_ = 0.0;
+        ControllerAxisErrorInfo error_info_;
+
     public:
         explicit PID(const PIDParameters& params) : params_(params)
         {
@@ -51,51 +52,31 @@ namespace rpp_control {
                 return 0.0;
             }
 
-            const FP_TYPE error = ref - state;
-            if (!std::isfinite(error))
+            auto candidate = error_info_;
+            if (!update_controller_axis_error_info(
+                    candidate, ref, state, dt, params_.ki != 0.0))
             {
                 reset();
                 return 0.0;
             }
 
-            FP_TYPE candidate_integral_error = integral_error_;
-            if (params_.ki != 0.0)
+            if (params_.integral_limit > 0.0)
             {
-                candidate_integral_error += error * dt;
-                if (!std::isfinite(candidate_integral_error))
-                {
-                    reset();
-                    return 0.0;
-                }
-
-                if (params_.integral_limit > 0.0)
-                {
-                    candidate_integral_error = std::clamp(
-                        candidate_integral_error, -params_.integral_limit,
-                        params_.integral_limit);
-                }
-            }
-
-            const FP_TYPE derivative = (error - previous_error_) / dt;
-            if (!std::isfinite(derivative))
-            {
-                reset();
-                return 0.0;
+                candidate.integral_error = std::clamp(
+                    candidate.integral_error, -params_.integral_limit,
+                    params_.integral_limit);
             }
             if (params_.derivative_filter_coefficient > 0.0)
             {
-                previous_derivative_ =
-                    params_.derivative_filter_coefficient * previous_derivative_
-                    + (1.0 - params_.derivative_filter_coefficient) * derivative;
-            }
-            else
-            {
-                previous_derivative_ = derivative;
+                candidate.previous_derivative =
+                    params_.derivative_filter_coefficient * error_info_.previous_derivative
+                    + (1.0 - params_.derivative_filter_coefficient)
+                      * candidate.previous_derivative;
             }
 
-            FP_TYPE output = params_.kp * error
-                + params_.ki * candidate_integral_error
-                + params_.kd * previous_derivative_;
+            FP_TYPE output = params_.kp * candidate.previous_error
+                + params_.ki * candidate.integral_error
+                + params_.kd * candidate.previous_derivative;
             if (!std::isfinite(output))
             {
                 reset();
@@ -105,7 +86,7 @@ namespace rpp_control {
             if (params_.output_limit > 0.0)
             {
                 const FP_TYPE integral_contribution = params_.ki
-                    * (candidate_integral_error - integral_error_);
+                    * (candidate.integral_error - error_info_.integral_error);
                 const bool grows_upper_saturation =
                     output > params_.output_limit
                     && integral_contribution > 0.0;
@@ -114,27 +95,38 @@ namespace rpp_control {
                     && integral_contribution < 0.0;
                 if (grows_upper_saturation || grows_lower_saturation)
                 {
-                    candidate_integral_error = integral_error_
+                    candidate.integral_error = error_info_.integral_error
                         + (1.0 - params_.anti_windup_gain)
-                        * (candidate_integral_error - integral_error_);
-                    output = params_.kp * error
-                        + params_.ki * candidate_integral_error
-                        + params_.kd * previous_derivative_;
+                        * (candidate.integral_error - error_info_.integral_error);
+                    output = params_.kp * candidate.previous_error
+                        + params_.ki * candidate.integral_error
+                        + params_.kd * candidate.previous_derivative;
                 }
                 output = std::clamp(output,
                     -params_.output_limit, params_.output_limit);
             }
 
-            integral_error_ = candidate_integral_error;
-            previous_error_ = error;
+            error_info_ = candidate;
             return output;
         }
 
         void reset()
         {
-            integral_error_ = 0.0;
-            previous_error_ = 0.0;
-            previous_derivative_ = 0.0;
+            error_info_ = {};
+        }
+
+        [[nodiscard]] ControllerAxisErrorInfo error_info() const
+        {
+            return error_info_;
+        }
+
+        void restore_error_info(const ControllerAxisErrorInfo & state)
+        {
+            if (!is_valid_controller_axis_error_info(state))
+            {
+                throw std::invalid_argument("PID handover state must be finite.");
+            }
+            error_info_ = state;
         }
 
     private:

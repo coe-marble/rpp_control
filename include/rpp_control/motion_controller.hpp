@@ -62,6 +62,8 @@ namespace rpp_control {
 
             struct Options
             {
+                // Leave child lifecycle ownership to the enclosing runtime when false.
+                bool activate_on_start = true;
                 DOF active_dofs = Traits::default_active_dofs;
                 std::vector<double> max_wrench_rate =
                     std::vector<double>(Dim::value, 0.0);
@@ -74,10 +76,11 @@ namespace rpp_control {
                 std::optional<AllocationSuppression> allocation_suppression;
             };
 
-            explicit MotionControllerT(const rpp::ComponentContext& context)
+            explicit MotionControllerT(const rpp::ComponentContext& context,
+                Options options = {})
                 : context_(&context),
                   active_dofs_(Traits::default_active_dofs),
-                  initialized_(false),
+                  configured_(false),
                   logger_(context.get_logger()),
                   clock_(context.get_clock()),
                   last_step_time_(clock_->now_seconds()),
@@ -93,17 +96,7 @@ namespace rpp_control {
             {
                 wrench_positive_scales_.fill(1.0);
                 wrench_negative_scales_.fill(1.0);
-            }
-
-            virtual ~MotionControllerT() = default;
-
-        protected:
-            virtual void configure()
-            {
-            }
-
-            void configure(const Options& options)
-            {
+                activate_on_start_ = options.activate_on_start;
                 set_active_dofs(options.active_dofs);
                 set_wrench_rate_limits(options.max_wrench_rate);
                 set_wrench_scales(options.wrench_positive_scales,
@@ -116,25 +109,40 @@ namespace rpp_control {
                 }
             }
 
-        public:
-            void initialize()
-            {
-                context_->initialize(); // initializes all subcomponents
-                configure();
-                RPP_LOG_DEBUG(*logger_,
-                    "Initializing motion controller active_dofs=0x%x.",
-                    static_cast<unsigned int>(active_dofs_));
-                controller_ = context_->template get_component<ControllerComponent>("controller");
-                allocator_ = context_->template get_component<AllocatorComponent>("allocator");
+            virtual ~MotionControllerT() = default;
 
-                if (!controller_)
+        public:
+            void configure()
+            {
+                if (configured_)
                 {
-                    throw std::runtime_error("MotionController requires a controller component named 'controller'.");
+                    throw std::logic_error("Motion controller is already configured.");
+                }
+                RPP_LOG_DEBUG(*logger_,
+                    "Configuring motion controller active_dofs=0x%x.",
+                    static_cast<unsigned int>(active_dofs_));
+                controller_context_ = &context_->get_subcomponent_context("controller");
+                allocator_context_ = &context_->get_subcomponent_context("allocator");
+                if (activate_on_start_)
+                {
+                    controller_context_->activate().require_success(
+                        "MotionController controller activation");
+                    const auto allocator_activation = allocator_context_->activate();
+                    if (!allocator_activation.success)
+                    {
+                        (void)controller_context_->deactivate();
+                        allocator_activation.require_success("MotionController allocator activation");
+                    }
                 }
 
-                if (!allocator_)
+                // A SubcomponentContext returns either a native implementation
+                // or an adapter-client proxy through the declared interface.
+                controller_ = controller_context_->template get_instance<ControllerComponent>();
+                allocator_ = allocator_context_->template get_instance<AllocatorComponent>();
+                if (!controller_ || !allocator_)
                 {
-                    throw std::runtime_error("MotionController requires an allocator component named 'allocator'.");
+                    throw std::runtime_error(
+                        "MotionController requires controller and allocator components.");
                 }
                 const auto num_commands = allocator_->outputSize();
                 RPP_LOG_INFO(*logger_, "Allocator output size: %d", num_commands);
@@ -144,14 +152,14 @@ namespace rpp_control {
                 ref_state_msg_ = InputMessage{};
                 enabler_odom_msg_ = EnablerOdometry{};
 
-                initialized_ = true;
-                RPP_LOG_DEBUG(*logger_, "Motion controller initialized.");
+                configured_ = true;
+                RPP_LOG_DEBUG(*logger_, "Motion controller configured.");
             }
 
             bool step(double dt)
             {
                 std::lock_guard<std::mutex> step_lock(step_mutex_);
-                if (!initialized_)
+                if (!configured_)
                 {
                     clear_outputs();
                     return false;
@@ -265,14 +273,12 @@ namespace rpp_control {
                     {
                         std::lock_guard<std::mutex> lock(mutex_);
                         Traits::parse_output_message(
-                            std::move(requested_wrench),
                             std::move(allocated_result),
-                            state_live_.wrench_ref,
                             state_live_.wrench,
                             state_live_.commands
                         );
                         allocation_suppression_.previous_requested_wrench =
-                            state_live_.wrench_ref;
+                            Traits::wrench_values(requested_wrench);
                     }
                 }
                 catch (const std::exception& exception)
@@ -336,7 +342,6 @@ namespace rpp_control {
                     {
                         state_live_.wrench_ref[i] = 0.;
                     }
-
                     state_live_.has_pose_ext[i] = has_pose_ext;
                     state_live_.has_twist_ext[i] = has_twist_ext;
                     state_live_.has_wrench_ext[i] = has_wrench_ext;
@@ -463,10 +468,10 @@ namespace rpp_control {
                 }
 
                 std::lock_guard<std::mutex> lock(mutex_);
-                if (initialized_)
+                if (configured_)
                 {
                     throw std::logic_error(
-                        "Wrench scales cannot change after initialization.");
+                        "Wrench scales cannot change after configuration.");
                 }
                 wrench_positive_scales_ = positive;
                 wrench_negative_scales_ = negative;
@@ -1199,9 +1204,10 @@ namespace rpp_control {
 
             const rpp::ComponentContext* context_;
             DOF active_dofs_;
-            bool initialized_;
-            std::shared_ptr<rpp::RppLogger> logger_;
-            std::shared_ptr<rpp::RppClock> clock_;
+            bool configured_;
+            bool activate_on_start_{true};
+            std::shared_ptr<const rpp::RppLogger> logger_;
+            std::shared_ptr<const rpp::RppClock> clock_;
             double last_step_time_;
             double latch_timeout_;
             double feedback_timeout_;
@@ -1219,6 +1225,8 @@ namespace rpp_control {
             typename ControllerIO::Error errors_;
             DebugSnapshotBuffer debug_snapshot_buffer_{};
 
+            const rpp::SubcomponentContext* controller_context_{nullptr};
+            const rpp::SubcomponentContext* allocator_context_{nullptr};
             std::shared_ptr<ControllerComponent> controller_;
             std::shared_ptr<AllocatorComponent> allocator_;
 
