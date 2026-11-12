@@ -1,7 +1,6 @@
 #include <array>
 #include <cmath>
 #include <limits>
-#include <optional>
 #include <utility>
 
 #include <gtest/gtest.h>
@@ -21,9 +20,12 @@ rpp::ScriptRuntime<> build_control_runtime()
   rpp::RppDataManager data_manager(rpp::RPP_HOME);
   rpp::ComponentRuntimeBuilder builder(
     data_manager, rpp::ClockOptions(rpp::RPP_CLOCK_MOCK));
-  return builder.build_script({
-      rpp::ScriptDescriptionPath{"./tests/data/test_description/motion_controller2d.json"},
-      std::nullopt, "./tests/data/test_ws_parts"});
+  // Construct the selected alternative in place to avoid GCC's temporary-variant warning.
+  rpp::ScriptRequest request{};
+  request.source.emplace<rpp::ScriptDescriptionPath>().path =
+    "./tests/data/test_description/motion_controller2d.json";
+  request.parts_folder = "./tests/data/test_ws_parts";
+  return builder.build_script(request);
 }
 
 std::array<double, 18> axis_values(const ControllerState & state)
