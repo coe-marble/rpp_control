@@ -15,7 +15,7 @@
             "PluginName": "rpp_control::PIDTwistController2D",
             "SlotName": "twist_controller",
             "Library": "rpp_control",
-            "Folder": "/home/luka/fer/rpp/rpp_control/.rppws/parts/rpp_control__p_i_d_twist_controller2_d/c67287af-7a07-4c08-9f6e-4f0563d895a6",
+            "Folder": "../../rpp_control__p_i_d_twist_controller2_d/c67287af-7a07-4c08-9f6e-4f0563d895a6",
             "IsLinked": true
         },
         "pose_controller": {
@@ -24,7 +24,7 @@
             "PluginName": "rpp_control::PIDPoseController2D",
             "SlotName": "pose_controller",
             "Library": "rpp_control",
-            "Folder": "/home/luka/fer/rpp/rpp_control/.rppws/parts/rpp_control__p_i_d_pose_controller2_d/e5fc835c-0899-48eb-8628-742f3d478818",
+            "Folder": "../../rpp_control__p_i_d_pose_controller2_d/e5fc835c-0899-48eb-8628-742f3d478818",
             "IsLinked": true
         }
     },

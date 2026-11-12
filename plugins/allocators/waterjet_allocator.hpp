@@ -20,7 +20,8 @@ public:
         ParameterDescription::create<double>("jet_x", -1.5),
         ParameterDescription::create<double>("jet_y", 0.0),
         ParameterDescription::create<double>("max_thrust", 6000.0),
-        ParameterDescription::create<double>("max_angle", 0.61),
+        ParameterDescription::create<double>("max_angle", 0.5235987756),
+        ParameterDescription::create<double>("surge_direction_hysteresis", 0.0),
         ParameterDescription::create<double>("mass", 450.0),
         ParameterDescription::create<double>("z_cg", 0.4),
         ParameterDescription::create<double>("metacentric_height", 0.3),
@@ -33,6 +34,8 @@ public:
         jet_y_ = context.get_parameter<double>("jet_y");
         max_thrust_ = context.get_parameter<double>("max_thrust");
         max_angle_ = context.get_parameter<double>("max_angle");
+        surge_direction_hysteresis_ =
+            context.get_parameter<double>("surge_direction_hysteresis");
         mass_ = context.get_parameter<double>("mass");
         z_cg_ = context.get_parameter<double>("z_cg");
         metacentric_height_ = context.get_parameter<double>("metacentric_height");
@@ -45,8 +48,8 @@ public:
     rpp::CallbackResult on_activate(
         const std::optional<HandoverState::Const> &) override
     {
-        // The current allocator is configuration-only. Future allocators can
-        // restore rate-limit or optimizer state from AllocatorHandoverState.
+        // Direction starts forward on activation; it is not transferred in handover.
+        thrust_direction_ = 1.0;
         return {};
     }
 
@@ -105,7 +108,21 @@ public:
             max_thrust_ * std::sin(max_angle_));
         const double allocated_y_force = std::clamp(requested_y_force,
             -max_lateral_force, max_lateral_force);
-        const double thrust_direction = tau_x < 0.0 ? -1.0 : 1.0;
+        // Retain direction near zero instead of reversing the minimum surge
+        // required to realize a yaw demand on every sign change.
+        if (surge_direction_hysteresis_ == 0.0)
+        {
+            thrust_direction_ = tau_x < 0.0 ? -1.0 : 1.0;
+        }
+        else if (tau_x > surge_direction_hysteresis_)
+        {
+            thrust_direction_ = 1.0;
+        }
+        else if (tau_x < -surge_direction_hysteresis_)
+        {
+            thrust_direction_ = -1.0;
+        }
+        const double thrust_direction = thrust_direction_;
         const double min_abs_x_force = std::abs(allocated_y_force)
             / std::tan(max_angle_);
         const double max_abs_x_force = std::sqrt(std::max(0.0,
@@ -166,6 +183,7 @@ private:
         };
         if (!is_finite(jet_x_) || !is_finite(jet_y_)
             || !is_finite(max_thrust_) || !is_finite(max_angle_)
+            || !is_finite(surge_direction_hysteresis_)
             || !is_finite(mass_) || !is_finite(z_cg_)
             || !is_finite(metacentric_height_)
             || !is_finite(max_safe_roll_rad_))
@@ -174,7 +192,9 @@ private:
                 "Waterjet allocator parameters must be finite.");
         }
         if (max_thrust_ <= 0.0 || max_angle_ <= 0.0
-            || max_angle_ > kPi / 2.0 || mass_ <= 0.0 || z_cg_ <= 0.0
+            || max_angle_ > kPi / 2.0
+            || surge_direction_hysteresis_ < 0.0
+            || surge_direction_hysteresis_ > max_thrust_ || mass_ <= 0.0 || z_cg_ <= 0.0
             || metacentric_height_ <= 0.0 || max_safe_roll_rad_ < 0.0
             || max_safe_roll_rad_ >= kPi / 2.0)
         {
@@ -184,5 +204,7 @@ private:
     }
 
     double jet_x_, jet_y_, max_thrust_, max_angle_;
+    double surge_direction_hysteresis_ = 0.0;
+    double thrust_direction_ = 1.0;
     double mass_, z_cg_, metacentric_height_, max_safe_roll_rad_;
 };

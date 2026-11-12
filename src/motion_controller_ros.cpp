@@ -1,6 +1,7 @@
 #include <rpp_control/ros/motion_controller_ros.hpp>
 
 #include <rpp_cpp/data_manager.hpp>
+#include <rclcpp/create_timer.hpp>
 
 #include <algorithm>
 #include <array>
@@ -18,6 +19,19 @@
 #include <vector>
 
 namespace {
+
+class RosControlClock final : public rpp::RppClock
+{
+public:
+    explicit RosControlClock(rclcpp::Clock::SharedPtr clock) : clock_(std::move(clock)) {}
+    double now_seconds() const override {return clock_->now().seconds();}
+    uint64_t now_nanoseconds() const override
+    {
+        return static_cast<uint64_t>(clock_->now().nanoseconds());
+    }
+private:
+    rclcpp::Clock::SharedPtr clock_;
+};
 
 bool to_signal_status(
     const std::uint8_t selection,
@@ -179,6 +193,19 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
         throw std::runtime_error("rpp_workspace must be specified.");
     }
 
+    rcl_interfaces::msg::ParameterDescriptor time_descriptor;
+    time_descriptor.description =
+        "Startup clock for the control timer, dt and watchdogs: steady or ros. "
+        "Use ros with use_sim_time=true for simulation.";
+    time_descriptor.read_only = true;
+    const auto time_source = declare_parameter<std::string>(
+        "control_time_source", "steady", time_descriptor);
+    if (time_source != "steady" && time_source != "ros")
+    {
+        throw std::runtime_error("control_time_source must be steady or ros.");
+    }
+    use_ros_control_time_ = time_source == "ros";
+
     MotionController2DImpl::Options controller_2d_options{};
     MotionController3DImpl::Options controller_3d_options{};
     if (type == "2D")
@@ -189,6 +216,13 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
     else if (type == "3D")
     {
         controller_3d_options.activate_on_start = activate_on_start;
+    }
+
+    if (use_ros_control_time_)
+    {
+        auto clock = std::make_shared<RosControlClock>(get_clock());
+        controller_2d_options.clock = clock;
+        controller_3d_options.clock = clock;
     }
 
     rpp::RppDataManager data_manager(rpp::RPP_HOME, rpp_workspace);
@@ -324,10 +358,29 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions &options)
             "Parameter 'max_control_dt' must be finite and at least control_period.");
     }
     last_control_tick_ = std::chrono::steady_clock::now();
-    control_timer_ = create_wall_timer(
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::duration<double>(control_period)),
-        std::bind(&MotionControllerRos::on_control_timer_, this));
+    if (use_ros_control_time_)
+    {
+        last_ros_control_tick_ = this->now();
+        rcl_jump_threshold_t threshold{};
+        threshold.on_clock_change = true;
+        threshold.min_backward.nanoseconds = -1;
+        threshold.min_forward.nanoseconds =
+            rclcpp::Duration::from_seconds(max_control_dt_).nanoseconds();
+        control_jump_handler_ = get_clock()->create_jump_callback(
+            nullptr, [this](const rcl_time_jump_t &) {
+                control_clock_reset_.store(true, std::memory_order_relaxed);
+            }, threshold);
+        control_timer_ = rclcpp::create_timer(
+            this, get_clock(), rclcpp::Duration::from_seconds(control_period),
+            std::bind(&MotionControllerRos::on_control_timer_, this));
+    }
+    else
+    {
+        control_timer_ = create_wall_timer(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::duration<double>(control_period)),
+            std::bind(&MotionControllerRos::on_control_timer_, this));
+    }
     RPP_LOG_DEBUG(*logger_,
         "Controller configured type=%s developer_topics=%d control_period=%.3f "
         "max_control_dt=%.3f.",
@@ -343,10 +396,31 @@ void MotionControllerRos::on_control_timer_()
         return;
     }
 
-    const auto now = std::chrono::steady_clock::now();
-    const double dt = std::chrono::duration<double>(
-        now - last_control_tick_).count();
-    last_control_tick_ = now;
+    double dt;
+    if (use_ros_control_time_)
+    {
+        const auto now = this->now();
+        dt = (now - last_ros_control_tick_).seconds();
+        last_ros_control_tick_ = now;
+        if (control_clock_reset_.exchange(false, std::memory_order_relaxed))
+        {
+            std::visit([](auto & controller) {
+                using Controller = std::decay_t<decltype(controller)>;
+                if constexpr (!std::is_same_v<Controller, std::monostate>)
+                {
+                    controller.reset_time_state();
+                }
+            }, controller_);
+            publish_control_result_(false, 0.0);
+            return;
+        }
+    }
+    else
+    {
+        const auto now = std::chrono::steady_clock::now();
+        dt = std::chrono::duration<double>(now - last_control_tick_).count();
+        last_control_tick_ = now;
+    }
 
     bool control_active = false;
     if (std::isfinite(dt) && dt > 0.0 && dt <= max_control_dt_)

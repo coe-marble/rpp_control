@@ -144,3 +144,44 @@ TEST(WaterjetAllocatorSafety, sweeps_normalized_surge_and_yaw_grid)
 }
 
 }  // namespace
+
+TEST(WaterjetAllocatorSafety, RetainsDirectionNearZeroAndResetsOnActivation)
+{
+  const std::string data_directory = "./tests/data/waterjet_allocator_safety";
+  rpp::RppDataManager data_manager(rpp::RPP_HOME);
+  rpp::ComponentRuntimeBuilder builder(
+    data_manager, rpp::ClockOptions(rpp::RPP_CLOCK_MOCK));
+  auto runtime = builder.build_script({
+    rpp::ScriptDescriptionPath{data_directory + "/waterjet_allocator.json"},
+    std::nullopt, data_directory + "/parts"});
+  ASSERT_TRUE(runtime.configure().success);
+  const auto & context = runtime.get_context().get_subcomponent_context("allocator");
+  ASSERT_TRUE(context.activate().success);
+  using Allocator = rpp_control::MotionControllerAllocator2D;
+  auto allocator = context.get_instance<Allocator>();
+  ASSERT_NE(allocator, nullptr);
+  const auto surge = [&](double requested_surge) {
+    Allocator::Wrench2D reference;
+    reference.force().x() = requested_surge;
+    reference.torque() = 100.0;
+    Allocator::Odometry2D measured;
+    Allocator::Enabler2D enabled;
+    enabled.enableX() = true;
+    enabled.enableN() = true;
+    const auto result = allocator->allocate(
+      reference.as_const(), measured.as_const(), enabled.as_const(), 0.02);
+    EXPECT_NEAR(std::get<1>(result).torque(), 100.0, k_tolerance);
+    return std::get<1>(result).force().x();
+  };
+  EXPECT_GT(surge(0.0), 0.0);
+  EXPECT_GT(surge(-1.0), 0.0);
+  EXPECT_GT(surge(-50.0), 0.0);
+  EXPECT_LT(surge(-51.0), 0.0);
+  EXPECT_LT(surge(1.0), 0.0);
+  EXPECT_LT(surge(50.0), 0.0);
+  EXPECT_GT(surge(51.0), 0.0);
+  EXPECT_LT(surge(-51.0), 0.0);
+  ASSERT_TRUE(context.deactivate().result.success);
+  ASSERT_TRUE(context.activate().success);
+  EXPECT_GT(surge(0.0), 0.0);
+}

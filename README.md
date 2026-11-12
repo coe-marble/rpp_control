@@ -34,6 +34,30 @@ When yaw is enabled, `WaterjetAllocator` gives yaw priority and derives the
 nozzle lateral force from the requested yaw moment. It ignores direct sway
 force instead of summing incompatible sway and yaw demands.
 
+### Waterjet direction and nozzle limits
+
+`WaterjetAllocator.surge_direction_hysteresis` is a finite surge-force threshold
+in newtons, in `[0, max_thrust]` (default `0.0` for compatibility). The supplied
+allocator parts set it to `50.0` N. The allocator starts forward
+on each activation. It switches to reverse only below the negative threshold,
+and forward only above the positive threshold; at and between the thresholds it
+retains direction. Set the threshold to `0.0` to restore the previous sign-based
+behavior. Parameters are read at configuration; restart/reconfigure to change them.
+Direction history is not transferred during allocator handover.
+
+Hysteresis prevents small surge requests around zero from repeatedly reversing
+the surge needed to produce yaw. It does not permit turning in place: a single
+nozzle still needs nonzero surge to produce lateral force. A small surge request
+opposite the retained direction can therefore produce surge in the retained
+direction. Tune the threshold for the vehicle and controller.
+
+The default `max_angle` and the supplied allocator parts now use
+`0.5235987756` rad (30 degrees), matching the Jetski simulation nozzle. This
+changes the previous `0.61` rad default. The allocator and physical/simulated
+nozzle must use the same angle limits and thrust scaling: the second output is
+`angle / max_angle`, so a mismatch changes the realized wrench even before
+saturation. Explicit overrides must be updated in both configurations.
+
 ## Allocation-feedback priority
 
 `MotionController2DImpl` compares residuals using its signed wrench scales,
@@ -97,3 +121,53 @@ controller must use the same clock. Existing reference watchdogs still apply.
 Unstamped inputs bypass this filter. Setting `discard_old_stamped_messages` to
 `false` ignores header timestamps. Valid parameter updates take effect without
 restarting; rejected atomic updates leave the filtering policy unchanged.
+
+## Control time and simulation
+
+`control_time_source` is a startup-only ROS parameter:
+
+- `steady` (default) preserves the wall timer and monotonic `dt`, with existing
+  RPP runtime receipt-time watchdogs.
+- `ros` uses the node's ROS clock for the timer, `dt`, reference receipt times,
+  and feedback/reference watchdogs. Set `use_sim_time: true` as well to follow
+  `/clock`. A Python host is not required for this mode.
+
+For example, launch with `--ros-args -p control_time_source:=ros -p use_sim_time:=true`
+in addition to the required workspace parameters. Pausing `/clock` pauses control
+updates and simulation-time watchdog aging. Configure `control_period` and
+`max_control_dt` in simulation seconds; `/clock` increments must fit within
+`max_control_dt`. Invalid or excessive step durations retain the existing stop
+behavior. Node-clock mode does not replace the clocks of arbitrary child plugins.
+
+A backward clock jump, a change of clock source, or a forward clock jump of at
+least `max_control_dt` invalidates cached feedback and references and resets the
+controller on the next enabled timer callback. That callback publishes zero
+outputs; fresh feedback and references must arrive after it before control can
+resume. Authority tokens and signal selections survive. Receipt at simulation
+time zero is valid. A paused simulator does not publish repeated zero commands;
+this mode is intended for simulation, with actuator watchdogs handled separately.
+
+## Authority release and aborts
+
+`ReleaseControl` releases the token authorizing `SelectSignal`. It leaves signal
+selections, references and outputs unchanged; it is not a stop command.
+
+`ReleaseExternalReference` releases the matching reference authority and clears
+its cached references. On a successful release, it also zeroes stored wrench and
+actuator commands. It does not disable axes, release control authority, or latch
+a persistent stop: another valid reference can drive a later control update.
+The service does not itself publish an actuator command; the next timer update
+can recompute outputs before publishing them.
+
+For the reported abort sequence, keep the control token while selecting
+`DISABLEAXIS` for **both twist and wrench** on all axes to be disabled, release
+the external reference token, then release control authority if appropriate.
+These are separate service calls, not an atomic emergency stop. The `ctl_enable`
+service only gates timer execution; disabling it does not publish a zero command.
+
+## Portable component descriptions
+
+The supplied cascade parts use `Folder` paths relative to the containing part
+folder. Linked children retain their IDs; the current C++ runtime resolves them
+by plugin and linked-component ID within the same parts root. The descriptions
+and test fixtures no longer contain a developer-specific checkout path.
