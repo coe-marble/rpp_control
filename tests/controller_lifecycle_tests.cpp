@@ -22,8 +22,8 @@ rpp::ScriptRuntime<> build_control_runtime()
   rpp::ComponentRuntimeBuilder builder(
     data_manager, rpp::ClockOptions(rpp::RPP_CLOCK_MOCK));
   return builder.build_script({
-    rpp::ScriptDescriptionPath{"./tests/data/test_description/motion_controller2d.json"},
-    std::nullopt, "./tests/data/test_ws_parts"});
+      rpp::ScriptDescriptionPath{"./tests/data/test_description/motion_controller2d.json"},
+      std::nullopt, "./tests/data/test_ws_parts"});
 }
 
 std::array<double, 18> axis_values(const ControllerState & state)

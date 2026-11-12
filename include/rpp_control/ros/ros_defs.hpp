@@ -25,30 +25,31 @@
 #include <marble_control_msgs/srv/select_signal.hpp>
 
 
-namespace rpp_control {
+namespace rpp_control
+{
 
-  using Pose = geometry_msgs::msg::Pose;
-  using PoseStamped = geometry_msgs::msg::PoseStamped;
-  using Twist = geometry_msgs::msg::Twist;
-  using TwistStamped = geometry_msgs::msg::TwistStamped;
-  using Wrench = geometry_msgs::msg::Wrench;
-  using WrenchStamped = geometry_msgs::msg::WrenchStamped;
-  using Int32MultiArray = std_msgs::msg::Int32MultiArray;
-  using Float32MultiArray = std_msgs::msg::Float32MultiArray;
-  using Float64MultiArray = std_msgs::msg::Float64MultiArray;
-  using String = std_msgs::msg::String;
-  using NavigationStatus = nav_msgs::msg::Odometry;
-  using WrenchReference = marble_control_msgs::msg::WrenchReference;
-  using TwistReference = marble_control_msgs::msg::TwistReference;
-  using PoseReference = marble_control_msgs::msg::PoseReference;
-  using RequestControl = marble_control_msgs::srv::RequestControl;
-  using ControlStatus = marble_control_msgs::msg::ControlStatus;
-  using ControlState = marble_control_msgs::msg::ControlState;
-  using RequestExternalReference = marble_control_msgs::srv::RequestExternalReference;
-  using ReleaseControl = marble_control_msgs::srv::ReleaseControl;
-  using ReleaseExternalReference =
-    marble_control_msgs::srv::ReleaseExternalReference;
-  using SelectSignal = marble_control_msgs::srv::SelectSignal;
+using Pose = geometry_msgs::msg::Pose;
+using PoseStamped = geometry_msgs::msg::PoseStamped;
+using Twist = geometry_msgs::msg::Twist;
+using TwistStamped = geometry_msgs::msg::TwistStamped;
+using Wrench = geometry_msgs::msg::Wrench;
+using WrenchStamped = geometry_msgs::msg::WrenchStamped;
+using Int32MultiArray = std_msgs::msg::Int32MultiArray;
+using Float32MultiArray = std_msgs::msg::Float32MultiArray;
+using Float64MultiArray = std_msgs::msg::Float64MultiArray;
+using String = std_msgs::msg::String;
+using NavigationStatus = nav_msgs::msg::Odometry;
+using WrenchReference = marble_control_msgs::msg::WrenchReference;
+using TwistReference = marble_control_msgs::msg::TwistReference;
+using PoseReference = marble_control_msgs::msg::PoseReference;
+using RequestControl = marble_control_msgs::srv::RequestControl;
+using ControlStatus = marble_control_msgs::msg::ControlStatus;
+using ControlState = marble_control_msgs::msg::ControlState;
+using RequestExternalReference = marble_control_msgs::srv::RequestExternalReference;
+using ReleaseControl = marble_control_msgs::srv::ReleaseControl;
+using ReleaseExternalReference =
+  marble_control_msgs::srv::ReleaseExternalReference;
+using SelectSignal = marble_control_msgs::srv::SelectSignal;
 
 
 }  // namespace rpp_control

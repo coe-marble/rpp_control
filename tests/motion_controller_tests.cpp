@@ -9,43 +9,45 @@
 class TestMotionController : public ::testing::Test {
 
 public:
-    const double EPSILON = 1e-5;
+  const double EPSILON = 1e-5;
 
-    static std::string test_data_dir;
-    static bool initialization_successful;
+  static std::string test_data_dir;
+  static bool initialization_successful;
 
 protected:
-    static void SetUpTestSuite() {
-        test_data_dir = "./tests/data";
-        initialization_successful = true;
-    }
+  static void SetUpTestSuite()
+  {
+    test_data_dir = "./tests/data";
+    initialization_successful = true;
+  }
 
-    static void TearDownTestSuite() {
+  static void TearDownTestSuite()
+  {
         // std::filesystem::remove_all(tmp_dir);
-    }
+  }
 
-    static rpp::ScriptRuntime<> build_runtime()
-    {
-        rpp::RppDataManager data_manager(rpp::RPP_HOME);
-        rpp::ComponentRuntimeBuilder builder(
-            data_manager, rpp::ClockOptions(rpp::RPP_CLOCK_MOCK));
-        return builder.build_script({
-            rpp::ScriptDescriptionPath{
-                test_data_dir + "/test_description/motion_controller2d.json"},
-            std::nullopt, test_data_dir + "/test_ws_parts"});
-    }
+  static rpp::ScriptRuntime<> build_runtime()
+  {
+    rpp::RppDataManager data_manager(rpp::RPP_HOME);
+    rpp::ComponentRuntimeBuilder builder(
+      data_manager, rpp::ClockOptions(rpp::RPP_CLOCK_MOCK));
+    return builder.build_script({
+      rpp::ScriptDescriptionPath{
+        test_data_dir + "/test_description/motion_controller2d.json"},
+      std::nullopt, test_data_dir + "/test_ws_parts"});
+  }
 
-    static std::shared_ptr<rpp::RppClockMock> mock_clock(
-        const rpp::ComponentContext& context)
-    {
-        auto read_only_clock = std::dynamic_pointer_cast<const rpp::RppClockMock>(
+  static std::shared_ptr<rpp::RppClockMock> mock_clock(
+    const rpp::ComponentContext & context)
+  {
+    auto read_only_clock = std::dynamic_pointer_cast<const rpp::RppClockMock>(
             context.get_clock());
-        if (!read_only_clock) {
-            throw std::runtime_error("Test runtime did not create a mock clock");
-        }
-        return std::const_pointer_cast<rpp::RppClockMock>(
-            std::move(read_only_clock));
+    if (!read_only_clock) {
+      throw std::runtime_error("Test runtime did not create a mock clock");
     }
+    return std::const_pointer_cast<rpp::RppClockMock>(
+            std::move(read_only_clock));
+  }
 
 };
 
@@ -56,7 +58,7 @@ TEST_F(TestMotionController, TestInstance2DAndSetReferences) {
 
     auto runtime = build_runtime();
     ASSERT_TRUE(runtime.configure().success);
-    const auto& context = runtime.get_context();
+    const auto & context = runtime.get_context();
 
     auto clock = mock_clock(context);
 
@@ -114,13 +116,13 @@ TEST_F(TestMotionController, TestInstance2DAndSetReferences) {
     using SignalStatus = rpp_control::SignalStatus;
 
     controller_2d->set_wrench_selection(
-        {SignalStatus::SIGNAL_EXT,
-         SignalStatus::SIGNAL_INT,
-         SignalStatus::SIGNAL_DISABLED});
+    {SignalStatus::SIGNAL_EXT,
+      SignalStatus::SIGNAL_INT,
+      SignalStatus::SIGNAL_DISABLED});
     controller_2d->set_twist_selection(
-        {SignalStatus::SIGNAL_INT,
-         SignalStatus::SIGNAL_EXT,
-         SignalStatus::SIGNAL_DISABLED});
+    {SignalStatus::SIGNAL_INT,
+      SignalStatus::SIGNAL_EXT,
+      SignalStatus::SIGNAL_DISABLED});
     controller_2d->get_live_state(state);
 
     EXPECT_EQ(state.twist_selection[0], SignalStatus::SIGNAL_INT);
@@ -134,7 +136,7 @@ TEST_F(TestMotionController, TestInstance2DAndSetReferences) {
 TEST_F(TestMotionController, TestInstance2DAndStep) {
     auto runtime = build_runtime();
     ASSERT_TRUE(runtime.configure().success);
-    const auto& context = runtime.get_context();
+    const auto & context = runtime.get_context();
 
     auto clock = mock_clock(context);
     clock->set_time(100.0);
@@ -160,14 +162,14 @@ TEST_F(TestMotionController, TestInstance2DAndStep) {
     EXPECT_FALSE(controller_2d->step(-0.01));  // Wrong dt value.
 
     controller_2d->set_twist_selection(
-        {rpp_control::SignalStatus::SIGNAL_INT,
-         rpp_control::SignalStatus::SIGNAL_INT,
-         rpp_control::SignalStatus::SIGNAL_INT});
+    {rpp_control::SignalStatus::SIGNAL_INT,
+      rpp_control::SignalStatus::SIGNAL_INT,
+      rpp_control::SignalStatus::SIGNAL_INT});
 
     controller_2d->set_wrench_selection(
-        {rpp_control::SignalStatus::SIGNAL_INT,
-         rpp_control::SignalStatus::SIGNAL_INT,
-         rpp_control::SignalStatus::SIGNAL_INT});
+    {rpp_control::SignalStatus::SIGNAL_INT,
+      rpp_control::SignalStatus::SIGNAL_INT,
+      rpp_control::SignalStatus::SIGNAL_INT});
 
     EXPECT_TRUE(controller_2d->step(0.01)); // Should succeed now.
 
@@ -207,7 +209,7 @@ TEST_F(TestMotionController, TestInstance2DAndStep) {
 TEST_F(TestMotionController, ConfigureCanLeaveChildComponentsInactive) {
     auto runtime = build_runtime();
     ASSERT_TRUE(runtime.configure().success);
-    const auto& context = runtime.get_context();
+    const auto & context = runtime.get_context();
 
     rpp_control::MotionController2DImpl::Options options{};
     options.activate_on_start = false;
@@ -221,7 +223,7 @@ TEST_F(TestMotionController, ConfigureCanLeaveChildComponentsInactive) {
 TEST_F(TestMotionController, TestAllocationFeedbackSuppressesConflictingAxis) {
     auto runtime = build_runtime();
     ASSERT_TRUE(runtime.configure().success);
-    const auto& context = runtime.get_context();
+    const auto & context = runtime.get_context();
 
     auto clock = mock_clock(context);
     clock->set_time(100.0);
@@ -229,18 +231,18 @@ TEST_F(TestMotionController, TestAllocationFeedbackSuppressesConflictingAxis) {
     auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(
         context);
     auto allocation_suppression =
-        rpp_control::MotionController2DImpl::AllocationSuppression{};
+    rpp_control::MotionController2DImpl::AllocationSuppression{};
     allocation_suppression.priority_dof = rpp_control::DOF_N;
     allocation_suppression.suppressed_dof = rpp_control::DOF_X;
     controller_2d->set_allocation_suppression(allocation_suppression);
     controller_2d->configure();
     controller_2d->set_feedback({1.0, 2.0, 3.0}, {0.1, 0.2, 0.3});
     controller_2d->set_current_wrench_ref(
-        {3000.0, 0.0, 3000.0}, {true, false, true});
+    {3000.0, 0.0, 3000.0}, {true, false, true});
     controller_2d->set_wrench_selection(
-        {rpp_control::SIGNAL_EXT,
-         rpp_control::SIGNAL_DISABLED,
-         rpp_control::SIGNAL_EXT});
+    {rpp_control::SIGNAL_EXT,
+      rpp_control::SIGNAL_DISABLED,
+      rpp_control::SIGNAL_EXT});
 
     EXPECT_TRUE(controller_2d->step(0.01));
 
@@ -257,7 +259,7 @@ TEST_F(TestMotionController, TestAllocationFeedbackSuppressesConflictingAxis) {
 TEST_F(TestMotionController, TestZeroSurgeCommandSuppressesSurgeForYawRate) {
     auto runtime = build_runtime();
     ASSERT_TRUE(runtime.configure().success);
-    const auto& context = runtime.get_context();
+    const auto & context = runtime.get_context();
 
     auto clock = mock_clock(context);
     clock->set_time(100.0);
@@ -265,22 +267,22 @@ TEST_F(TestMotionController, TestZeroSurgeCommandSuppressesSurgeForYawRate) {
     auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(
         context);
     auto allocation_suppression =
-        rpp_control::MotionController2DImpl::AllocationSuppression{};
+    rpp_control::MotionController2DImpl::AllocationSuppression{};
     allocation_suppression.priority_dof = rpp_control::DOF_N;
     allocation_suppression.suppressed_dof = rpp_control::DOF_X;
     controller_2d->set_allocation_suppression(allocation_suppression);
     controller_2d->configure();
     controller_2d->set_feedback({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
     controller_2d->set_current_twist_ref(
-        {0.0, 0.0, 0.05}, {true, false, true});
+    {0.0, 0.0, 0.05}, {true, false, true});
     controller_2d->set_twist_selection(
-        {rpp_control::SIGNAL_EXT,
-         rpp_control::SIGNAL_DISABLED,
-         rpp_control::SIGNAL_EXT});
+    {rpp_control::SIGNAL_EXT,
+      rpp_control::SIGNAL_DISABLED,
+      rpp_control::SIGNAL_EXT});
     controller_2d->set_wrench_selection(
-        {rpp_control::SIGNAL_INT,
-         rpp_control::SIGNAL_DISABLED,
-         rpp_control::SIGNAL_INT});
+    {rpp_control::SIGNAL_INT,
+      rpp_control::SIGNAL_DISABLED,
+      rpp_control::SIGNAL_INT});
 
     EXPECT_TRUE(controller_2d->step(0.01));
 
@@ -293,7 +295,7 @@ TEST_F(TestMotionController, TestZeroSurgeCommandSuppressesSurgeForYawRate) {
 TEST_F(TestMotionController, TestRequestedWrenchRateLimit) {
     auto runtime = build_runtime();
     ASSERT_TRUE(runtime.configure().success);
-    const auto& context = runtime.get_context();
+    const auto & context = runtime.get_context();
 
     auto clock = mock_clock(context);
     clock->set_time(100.0);
@@ -304,11 +306,11 @@ TEST_F(TestMotionController, TestRequestedWrenchRateLimit) {
     controller_2d->set_wrench_rate_limits({1000.0, 0.0, 0.0});
     controller_2d->set_feedback({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
     controller_2d->set_current_wrench_ref(
-        {6000.0, 0.0, 0.0}, {true, false, false});
+    {6000.0, 0.0, 0.0}, {true, false, false});
     controller_2d->set_wrench_selection(
-        {rpp_control::SIGNAL_EXT,
-         rpp_control::SIGNAL_DISABLED,
-         rpp_control::SIGNAL_DISABLED});
+    {rpp_control::SIGNAL_EXT,
+      rpp_control::SIGNAL_DISABLED,
+      rpp_control::SIGNAL_DISABLED});
 
     EXPECT_TRUE(controller_2d->step(0.1));
     auto state = rpp_control::MotionController2DImpl::ControllerIO::State{};
@@ -326,7 +328,7 @@ TEST_F(TestMotionController, TestRequestedWrenchRateLimit) {
 TEST_F(TestMotionController, TestSuppressedSurgeDoesNotReverseYawWrench) {
     auto runtime = build_runtime();
     ASSERT_TRUE(runtime.configure().success);
-    const auto& context = runtime.get_context();
+    const auto & context = runtime.get_context();
 
     auto clock = mock_clock(context);
     clock->set_time(100.0);
@@ -334,31 +336,31 @@ TEST_F(TestMotionController, TestSuppressedSurgeDoesNotReverseYawWrench) {
     auto controller_2d = std::make_unique<rpp_control::MotionController2DImpl>(
         context);
     auto allocation_suppression =
-        rpp_control::MotionController2DImpl::AllocationSuppression{};
+    rpp_control::MotionController2DImpl::AllocationSuppression{};
     allocation_suppression.priority_dof = rpp_control::DOF_N;
     allocation_suppression.suppressed_dof = rpp_control::DOF_X;
     controller_2d->set_allocation_suppression(allocation_suppression);
     controller_2d->configure();
     controller_2d->set_feedback({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
     controller_2d->set_current_twist_ref(
-        {0.0, 0.0, 0.1}, {false, false, true});
+    {0.0, 0.0, 0.1}, {false, false, true});
     controller_2d->set_current_wrench_ref(
-        {0.0, 0.0, 3000.0}, {true, false, true});
+    {0.0, 0.0, 3000.0}, {true, false, true});
     controller_2d->set_twist_selection(
-        {rpp_control::SIGNAL_DISABLED,
-         rpp_control::SIGNAL_DISABLED,
-         rpp_control::SIGNAL_EXT});
+    {rpp_control::SIGNAL_DISABLED,
+      rpp_control::SIGNAL_DISABLED,
+      rpp_control::SIGNAL_EXT});
     controller_2d->set_wrench_selection(
-        {rpp_control::SIGNAL_EXT,
-         rpp_control::SIGNAL_DISABLED,
-         rpp_control::SIGNAL_EXT});
+    {rpp_control::SIGNAL_EXT,
+      rpp_control::SIGNAL_DISABLED,
+      rpp_control::SIGNAL_EXT});
 
     EXPECT_TRUE(controller_2d->step(0.01));
     clock->elapse(0.01);
     EXPECT_TRUE(controller_2d->step(0.01));
 
     controller_2d->set_current_wrench_ref(
-        {0.0, 0.0, -3000.0}, {true, false, true});
+    {0.0, 0.0, -3000.0}, {true, false, true});
     clock->elapse(0.01);
     EXPECT_TRUE(controller_2d->step(0.01));
 
@@ -369,11 +371,12 @@ TEST_F(TestMotionController, TestSuppressedSurgeDoesNotReverseYawWrench) {
     EXPECT_NEAR(state.wrench[2], 0.0, EPSILON);
 }
 
-int main(int argc, char **argv) {
-    ::testing::InitGoogleTest(&argc, argv);
+int main(int argc, char **argv)
+{
+  ::testing::InitGoogleTest(&argc, argv);
 
     // setenv("TEST_DATA_DIR", TEST_DATA_DIR, 1);
 
     // Pokrećemo GoogleTest najnormalnije
-    return RUN_ALL_TESTS();
+  return RUN_ALL_TESTS();
 }

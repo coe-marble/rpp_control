@@ -31,8 +31,8 @@ constexpr double k_tolerance = 1e-9;
 
 double maximum_lateral_force()
 {
-  const double restoring_moment = k_mass * k_gravity * k_metacentric_height
-    * std::sin(k_max_safe_roll_deg * k_pi / 180.0);
+  const double restoring_moment = k_mass * k_gravity * k_metacentric_height *
+    std::sin(k_max_safe_roll_deg * k_pi / 180.0);
   return std::min(
     restoring_moment / k_center_of_gravity_height,
     k_max_thrust * std::sin(k_max_angle));
@@ -45,8 +45,8 @@ double maximum_safe_yaw_wrench()
 
 double normalized_grid_value(const std::size_t index)
 {
-  return -1.0 + 2.0 * static_cast<double>(index)
-    / static_cast<double>(k_grid_size - 1);
+  return -1.0 + 2.0 * static_cast<double>(index) /
+         static_cast<double>(k_grid_size - 1);
 }
 
 TEST(WaterjetAllocatorSafety, sweeps_normalized_surge_and_yaw_grid)
@@ -56,8 +56,8 @@ TEST(WaterjetAllocatorSafety, sweeps_normalized_surge_and_yaw_grid)
   rpp::ComponentRuntimeBuilder builder(
     data_manager, rpp::ClockOptions(rpp::RPP_CLOCK_MOCK));
   auto runtime = builder.build_script({
-    rpp::ScriptDescriptionPath{data_directory + "/waterjet_allocator.json"},
-    std::nullopt, data_directory + "/parts"});
+      rpp::ScriptDescriptionPath{data_directory + "/waterjet_allocator.json"},
+      std::nullopt, data_directory + "/parts"});
   ASSERT_TRUE(runtime.configure().success);
   const auto & context = runtime.get_context();
 
@@ -68,8 +68,8 @@ TEST(WaterjetAllocatorSafety, sweeps_normalized_surge_and_yaw_grid)
   ASSERT_NE(allocator, nullptr);
   EXPECT_EQ(allocator->outputSize(), 2U);
 
-  std::ofstream csv(std::filesystem::current_path()
-    / "waterjet_allocator_safety_grid.csv");
+  std::ofstream csv(std::filesystem::current_path() /
+    "waterjet_allocator_safety_grid.csv");
   ASSERT_TRUE(csv.is_open());
   csv << std::fixed << std::setprecision(12);
   csv << "surge_normalized,yaw_normalized,reference_surge_n,reference_yaw_nm,"
@@ -77,10 +77,8 @@ TEST(WaterjetAllocatorSafety, sweeps_normalized_surge_and_yaw_grid)
       << "realized_surge_n,realized_sway_n,realized_yaw_nm,"
       << "surge_error_n,yaw_error_nm,saturated\n";
 
-  for (std::size_t surge_index = 0; surge_index < k_grid_size; ++surge_index)
-  {
-    for (std::size_t yaw_index = 0; yaw_index < k_grid_size; ++yaw_index)
-    {
+  for (std::size_t surge_index = 0; surge_index < k_grid_size; ++surge_index) {
+    for (std::size_t yaw_index = 0; yaw_index < k_grid_size; ++yaw_index) {
       const double surge_normalized = normalized_grid_value(surge_index);
       const double yaw_normalized = normalized_grid_value(yaw_index);
       const double reference_surge = surge_normalized * k_max_thrust;
@@ -113,12 +111,12 @@ TEST(WaterjetAllocatorSafety, sweeps_normalized_surge_and_yaw_grid)
       const double realized_sway = realized.force().y();
       const double realized_yaw = realized.torque();
       const double realized_thrust = std::hypot(realized_surge, realized_sway);
-      const bool saturated = std::abs(thrust_command) >= 1.0 - k_tolerance
-        || std::abs(nozzle_command) >= 1.0 - k_tolerance;
+      const bool saturated = std::abs(thrust_command) >= 1.0 - k_tolerance ||
+        std::abs(nozzle_command) >= 1.0 - k_tolerance;
 
       SCOPED_TRACE(
-        "surge_normalized=" + std::to_string(surge_normalized)
-        + ", yaw_normalized=" + std::to_string(yaw_normalized));
+        "surge_normalized=" + std::to_string(surge_normalized) +
+          ", yaw_normalized=" + std::to_string(yaw_normalized));
       EXPECT_TRUE(std::isfinite(thrust_command));
       EXPECT_TRUE(std::isfinite(nozzle_command));
       EXPECT_TRUE(std::isfinite(realized_surge));
