@@ -36,7 +36,7 @@ public:
 
         pid_x_ = std::make_unique<PID>(pid_x_params);
         pid_y_ = std::make_unique<PID>(pid_y_params);
-        pid_yaw_ = std::make_unique<PID>(pid_yaw_params);
+        pid_yaw_ = std::make_unique<PID>(pid_yaw_params, true);
         return {};
     }
 

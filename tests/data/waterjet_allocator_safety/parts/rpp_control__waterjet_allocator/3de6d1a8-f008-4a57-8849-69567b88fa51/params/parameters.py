@@ -6,6 +6,7 @@ class ComponentParameters:
     jet_y = 0.0
     max_thrust = 6000.0
     max_angle = 0.5235987756
+    surge_direction_hysteresis = 50.0
     mass = 450.0
     z_cg = 0.4
     metacentric_height = 0.3

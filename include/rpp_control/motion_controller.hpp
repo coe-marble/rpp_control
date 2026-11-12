@@ -74,6 +74,8 @@ namespace rpp_control {
                 std::array<SignalStatus, Dim::value> default_wrench_selection{};
                 std::array<SignalStatus, Dim::value> default_twist_selection{};
                 std::optional<AllocationSuppression> allocation_suppression;
+                // Override the receipt-time and watchdog clock (e.g. ROS simulation time).
+                std::shared_ptr<const rpp::RppClock> clock;
             };
 
             explicit MotionControllerT(const rpp::ComponentContext& context,
@@ -82,11 +84,11 @@ namespace rpp_control {
                   active_dofs_(Traits::default_active_dofs),
                   configured_(false),
                   logger_(context.get_logger()),
-                  clock_(context.get_clock()),
+                  clock_(options.clock ? options.clock : context.get_clock()),
                   last_step_time_(clock_->now_seconds()),
                   latch_timeout_(0.5),
                   feedback_timeout_(1.0),
-                  feedback_time_(last_step_time_),
+                  feedback_time_(invalid_time_),
                   current_wrench_selection_({}),
                   current_twist_selection_({}),
                   current_pose_ref_stamp_sec_({}),
@@ -94,6 +96,9 @@ namespace rpp_control {
                   current_wrench_ref_stamp_sec_({}),
                   control_identity_token_()
             {
+                current_pose_ref_stamp_sec_.fill(invalid_time_);
+                current_twist_ref_stamp_sec_.fill(invalid_time_);
+                current_wrench_ref_stamp_sec_.fill(invalid_time_);
                 wrench_positive_scales_.fill(1.0);
                 wrench_negative_scales_.fill(1.0);
                 activate_on_start_ = options.activate_on_start;
@@ -313,6 +318,33 @@ namespace rpp_control {
                 RPP_LOG_DEBUG(*logger_, "Motion controller stopped.");
             }
 
+            // A clock discontinuity invalidates data from the previous timeline.
+            // Authority and signal selections survive, but fresh input is required.
+            void reset_time_state()
+            {
+                std::lock_guard<std::mutex> step_lock(step_mutex_);
+                {
+                    std::lock_guard<std::mutex> lock(mutex_);
+                    feedback_time_ = invalid_time_;
+                    current_pose_ref_stamp_sec_.fill(invalid_time_);
+                    current_twist_ref_stamp_sec_.fill(invalid_time_);
+                    current_wrench_ref_stamp_sec_.fill(invalid_time_);
+                    state_live_.pose_ref.fill(0.0);
+                    state_live_.twist_ref.fill(0.0);
+                    state_live_.wrench_ref.fill(0.0);
+                    state_live_.has_pose_ext.fill(false);
+                    state_live_.has_twist_ext.fill(false);
+                    state_live_.has_wrench_ext.fill(false);
+                    state_live_.has_any_pose_ext = false;
+                    state_live_.has_any_twist_ext = false;
+                    state_live_.has_any_wrench_ext = false;
+                    state_live_.has_feedback = false;
+                    last_step_time_ = clock_->now_seconds();
+                }
+                clear_outputs();
+                reset_controller();
+            }
+
             void latch_references(double curr_time_sec)
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -320,15 +352,20 @@ namespace rpp_control {
                 state_live_.has_any_twist_ext = false;
                 state_live_.has_any_wrench_ext = false;
 
-                state_live_.has_feedback = (feedback_time_ + feedback_timeout_) >= curr_time_sec;
+                state_live_.has_feedback = std::isfinite(feedback_time_)
+                    && feedback_time_ <= curr_time_sec
+                    && (feedback_time_ + feedback_timeout_) >= curr_time_sec;
 
                 for (size_t i = 0; i < Dim::value; i++)
                 {
-                    bool has_pose_ext = current_pose_ref_stamp_sec_[i] > 0
+                    bool has_pose_ext = std::isfinite(current_pose_ref_stamp_sec_[i])
+                        && current_pose_ref_stamp_sec_[i] <= curr_time_sec
                         && (current_pose_ref_stamp_sec_[i] + latch_timeout_) >= curr_time_sec;
-                    bool has_twist_ext = current_twist_ref_stamp_sec_[i] > 0
+                    bool has_twist_ext = std::isfinite(current_twist_ref_stamp_sec_[i])
+                        && current_twist_ref_stamp_sec_[i] <= curr_time_sec
                         && (current_twist_ref_stamp_sec_[i] + latch_timeout_) >= curr_time_sec;
-                    bool has_wrench_ext = current_wrench_ref_stamp_sec_[i] > 0
+                    bool has_wrench_ext = std::isfinite(current_wrench_ref_stamp_sec_[i])
+                        && current_wrench_ref_stamp_sec_[i] <= curr_time_sec
                         &&(current_wrench_ref_stamp_sec_[i] + latch_timeout_) >= curr_time_sec;
                     if (!has_pose_ext)
                     {
@@ -404,9 +441,9 @@ namespace rpp_control {
                     state_live_.has_pose_ext[i] = false;
                     state_live_.has_twist_ext[i] = false;
                     state_live_.has_wrench_ext[i] = false;
-                    current_pose_ref_stamp_sec_[i] = 0.0;
-                    current_twist_ref_stamp_sec_[i] = 0.0;
-                    current_wrench_ref_stamp_sec_[i] = 0.0;
+                    current_pose_ref_stamp_sec_[i] = invalid_time_;
+                    current_twist_ref_stamp_sec_[i] = invalid_time_;
+                    current_wrench_ref_stamp_sec_[i] = invalid_time_;
                 }
             }
 
@@ -483,7 +520,7 @@ namespace rpp_control {
                 if (!is_finite_array(pose) || !is_finite_array(twist))
                 {
                     state_live_.has_feedback = false;
-                    feedback_time_ = 0.0;
+                    feedback_time_ = invalid_time_;
                     RPP_LOG_DEBUG_ONCE(*logger_,
                         "Ignoring non-finite feedback.");
                     return;
@@ -536,7 +573,7 @@ namespace rpp_control {
                         else
                         {
                             io_ref_vec[i] = 0.0;
-                            current_ref_stamp_sec_[i] = 0.0;
+                            current_ref_stamp_sec_[i] = invalid_time_;
                         }
                     }
                 }
@@ -670,19 +707,19 @@ namespace rpp_control {
                             identity = Identity{};
                             if (has_state_index && ref_type == POSE_REF)
                             {
-                                current_pose_ref_stamp_sec_[state_index] = 0.0;
+                                current_pose_ref_stamp_sec_[state_index] = invalid_time_;
                                 state_live_.pose_ref[state_index] = 0.0;
                                 state_live_.has_pose_ext[state_index] = false;
                             }
                             else if (has_state_index && ref_type == TWIST_REF)
                             {
-                                current_twist_ref_stamp_sec_[state_index] = 0.0;
+                                current_twist_ref_stamp_sec_[state_index] = invalid_time_;
                                 state_live_.twist_ref[state_index] = 0.0;
                                 state_live_.has_twist_ext[state_index] = false;
                             }
                             else if (has_state_index && ref_type == WRENCH_REF)
                             {
-                                current_wrench_ref_stamp_sec_[state_index] = 0.0;
+                                current_wrench_ref_stamp_sec_[state_index] = invalid_time_;
                                 state_live_.wrench_ref[state_index] = 0.0;
                                 state_live_.has_wrench_ext[state_index] = false;
                             }
@@ -1207,6 +1244,8 @@ namespace rpp_control {
             bool configured_;
             bool activate_on_start_{true};
             std::shared_ptr<const rpp::RppLogger> logger_;
+            static constexpr double invalid_time_ =
+                -std::numeric_limits<double>::infinity();
             std::shared_ptr<const rpp::RppClock> clock_;
             double last_step_time_;
             double latch_timeout_;

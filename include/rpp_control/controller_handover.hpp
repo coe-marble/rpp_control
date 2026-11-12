@@ -46,14 +46,19 @@ inline void write_controller_axis_error_info(
 
 inline bool update_controller_axis_error_info(
   ControllerAxisErrorInfo & info, const FP_TYPE reference, const FP_TYPE state,
-  const FP_TYPE dt, const bool integrate = true)
+  const FP_TYPE dt, const bool integrate = true, const bool angular = false)
 {
   if (!std::isfinite(reference) || !std::isfinite(state)
     || !std::isfinite(dt) || dt <= 0.0) {
     return false;
   }
-  const auto error = reference - state;
-  const auto derivative = (error - info.previous_error) / dt;
+  auto error = reference - state;
+  if (!std::isfinite(error)) {return false;}
+  constexpr FP_TYPE two_pi = 6.28318530717958647692;
+  if (angular) {error = std::remainder(error, two_pi);}
+  auto error_delta = error - info.previous_error;
+  if (angular) {error_delta = std::remainder(error_delta, two_pi);}
+  const auto derivative = error_delta / dt;
   if (!std::isfinite(error) || !std::isfinite(derivative)) {return false;}
 
   const auto integral = integrate ? info.integral_error + error * dt : info.integral_error;

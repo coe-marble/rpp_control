@@ -9,6 +9,7 @@
 #include <rpp_control/pid.hpp>
 #include <rpp_cpp/component_runtime_builder.hpp>
 #include <rpp_plugin_types/rpp_control/MotionController2D.hpp>
+#include <rpp_plugin_types/rpp_control/PoseController2D.hpp>
 #include <rpp_schema/rpp_common/Odometry2D.hpp>
 #include <rpp_schema/rpp_control/EnablerOdometry2D.hpp>
 
@@ -110,4 +111,48 @@ TEST(ControllerLifecycle, CascadeTransfersPoseAndTwistPidHistories)
   ASSERT_TRUE(restored.state.has_value());
   ASSERT_TRUE(restored.state->holds<ControllerState>());
   EXPECT_EQ(axis_values(restored.state->get<ControllerState>()), first);
+}
+
+TEST(ControllerLifecycle, AngularPidUsesShortestErrorAndDerivativeAcrossWrap)
+{
+  constexpr double pi = 3.14159265358979323846;
+  rpp_control::PIDParameters parameters{};
+  parameters.kp = 1.0F;
+  rpp_control::PID pid(parameters, true);
+  EXPECT_NEAR(pid.step(170.0 * pi / 180.0, -170.0 * pi / 180.0, 0.02),
+    -20.0 * pi / 180.0, 1e-5);
+
+  parameters.kp = 0.0F;
+  parameters.kd = 1.0F;
+  pid.set_parameters(parameters);
+  pid.reset();
+  (void)pid.step(179.0 * pi / 180.0, 0.0, 1.0);
+  EXPECT_NEAR(pid.step(-179.0 * pi / 180.0, 0.0, 1.0),
+    2.0 * pi / 180.0, 1e-5);
+
+  // Linear channels retain ordinary subtraction.
+  rpp_control::PID linear(parameters);
+  EXPECT_NEAR(linear.step(170.0 * pi / 180.0, -170.0 * pi / 180.0, 1.0),
+    340.0 * pi / 180.0, 1e-5);
+}
+
+TEST(ControllerLifecycle, PoseControllerYawUsesShortTurnAcrossPi)
+{
+  auto runtime = build_control_runtime();
+  ASSERT_TRUE(runtime.configure().success);
+  const auto & cascade = runtime.get_context().get_subcomponent_context("controller");
+  ASSERT_TRUE(cascade.activate().success);
+  auto pose = cascade.get_subcomponent_context("pose_controller")
+    .get_instance<rpp_control::PoseController2D>();
+  ASSERT_NE(pose, nullptr);
+  rpp_control::PoseController2D::Pose2D reference;
+  rpp_control::PoseController2D::Pose2D measured;
+  rpp_control::PoseController2D::Enabler2D enabled;
+  constexpr double pi = 3.14159265358979323846;
+  reference.yaw() = 170.0 * pi / 180.0;
+  measured.yaw() = -170.0 * pi / 180.0;
+  enabled.enableN() = true;
+  const auto output = pose->step(
+    reference.as_const(), measured.as_const(), enabled.as_const(), 0.02);
+  EXPECT_LT(output.angular(), 0.0);
 }

@@ -28,9 +28,11 @@ namespace rpp_control {
     private:
         PIDParameters params_;
         ControllerAxisErrorInfo error_info_;
+        bool angular_;
 
     public:
-        explicit PID(const PIDParameters& params) : params_(params)
+        explicit PID(const PIDParameters& params, bool angular = false)
+            : params_(params), angular_(angular)
         {
             validate_parameters(params_);
         }
@@ -54,7 +56,7 @@ namespace rpp_control {
 
             auto candidate = error_info_;
             if (!update_controller_axis_error_info(
-                    candidate, ref, state, dt, params_.ki != 0.0))
+                    candidate, ref, state, dt, params_.ki != 0.0, angular_))
             {
                 reset();
                 return 0.0;

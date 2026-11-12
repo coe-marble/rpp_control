@@ -369,6 +369,54 @@ TEST_F(TestMotionController, TestSuppressedSurgeDoesNotReverseYawWrench) {
     EXPECT_NEAR(state.wrench[2], 0.0, EPSILON);
 }
 
+TEST_F(TestMotionController, InjectedClockSupportsTimeZeroAndInvalidatesOldTimeline)
+{
+    auto runtime = build_runtime();
+    ASSERT_TRUE(runtime.configure().success);
+    const auto & context = runtime.get_context();
+    mock_clock(context)->set_time(100.0);
+    auto simulation_clock = std::make_shared<rpp::RppClockMock>(0.0);
+    rpp_control::MotionController2DImpl::Options options;
+    options.clock = simulation_clock;
+    rpp_control::MotionController2DImpl controller(context, options);
+    rpp_control::MotionController2DImpl::ControllerIO::State state{};
+
+    // No feedback has arrived, including when the clock starts at zero.
+    controller.latch_references(0.0);
+    controller.get_live_state(state);
+    EXPECT_FALSE(state.has_feedback);
+    controller.set_feedback({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+    controller.set_current_pose_ref({1.0, 0.0, 0.0}, {true, false, false});
+    controller.latch_references(0.0);
+    controller.get_live_state(state);
+    EXPECT_TRUE(state.has_feedback);
+    EXPECT_TRUE(state.has_pose_ext[0]);
+
+    simulation_clock->set_time(0.6);
+    controller.latch_references(0.6);
+    controller.get_live_state(state);
+    EXPECT_TRUE(state.has_feedback);
+    EXPECT_FALSE(state.has_pose_ext[0]);
+    simulation_clock->set_time(1.1);
+    controller.latch_references(1.1);
+    controller.get_live_state(state);
+    EXPECT_FALSE(state.has_feedback);
+
+    simulation_clock->set_time(0.0);
+    controller.reset_time_state();
+    controller.latch_references(0.0);
+    controller.get_live_state(state);
+    EXPECT_FALSE(state.has_feedback);
+    EXPECT_FALSE(state.has_any_pose_ext);
+    EXPECT_DOUBLE_EQ(state.pose_ref[0], 0.0);
+    controller.set_feedback({0.0, 0.0, 0.0}, {0.0, 0.0, 0.0});
+    controller.set_current_pose_ref({2.0, 0.0, 0.0}, {true, false, false});
+    controller.latch_references(0.0);
+    controller.get_live_state(state);
+    EXPECT_TRUE(state.has_feedback);
+    EXPECT_TRUE(state.has_pose_ext[0]);
+}
+
 int main(int argc, char **argv) {
     ::testing::InitGoogleTest(&argc, argv);
 
