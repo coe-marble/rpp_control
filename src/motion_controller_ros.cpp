@@ -334,7 +334,7 @@ void MotionControllerRos::on_control_timer_()
           if constexpr (std::is_same_v<Controller, std::monostate>) {
             return false;
           } else {
-            return controller.step(dt);
+            return controller.is_active() && controller.step(dt);
           }
         }, controller_);
   } else {

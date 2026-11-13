@@ -298,13 +298,12 @@ public:
     return true;
   }
 
+  // Direct plugin pointers are not lifecycle-guarded. The ROS adapter checks
+  // this before its control loop so an inactive RPP slot produces safe output.
   [[nodiscard]] bool is_active() const
   {
-    return configured_ &&
-           static_cast<bool>(context_->template get_active_component<ControllerComponent>(
-        "controller")) &&
-           static_cast<bool>(context_->template get_active_component<AllocatorComponent>(
-        "allocator"));
+    return configured_ && controller_context_ && allocator_context_ &&
+      controller_context_->is_active() && allocator_context_->is_active();
   }
 
   void start()
