@@ -5,6 +5,7 @@
 #include <rpp_schema/rpp_control/ControllerAxisErrorInfo.hpp>
 
 #include "control_defs.hpp"
+#include "utils.hpp"
 
 namespace rpp_control
 {
@@ -46,15 +47,21 @@ inline void write_controller_axis_error_info(
 
 inline bool update_controller_axis_error_info(
   ControllerAxisErrorInfo & info, const FP_TYPE reference, const FP_TYPE state,
-  const FP_TYPE dt, const bool integrate = true)
+  const FP_TYPE dt, const bool integrate = true, const bool angular = false)
 {
   if (!std::isfinite(reference) || !std::isfinite(state) ||
     !std::isfinite(dt) || dt <= 0.0)
   {
     return false;
   }
-  const auto error = reference - state;
-  const auto derivative = (error - info.previous_error) / dt;
+  auto error = reference - state;
+  auto error_step = error - info.previous_error;
+  // Angles: take the short way round, and no derivative jump when the error crosses +-pi.
+  if (angular && std::isfinite(error) && std::isfinite(error_step)) {
+    error = wrap_angle(error);
+    error_step = wrap_angle(error - info.previous_error);
+  }
+  const auto derivative = error_step / dt;
   if (!std::isfinite(error) || !std::isfinite(derivative)) {return false;}
 
   const auto integral = integrate ? info.integral_error + error * dt : info.integral_error;
