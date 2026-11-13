@@ -52,7 +52,7 @@ public:
       twist.linear().y() = pid_y_->step(ref_state.position().y(), state.position().y(), dt);
     }
     if (enabler.enableN()) {
-      twist.angular() = pid_yaw_->step(ref_state.yaw(), state.yaw(), dt);
+      twist.angular() = pid_yaw_->step(ref_state.yaw(), state.yaw(), dt, true);
     }
     return twist;
   }
