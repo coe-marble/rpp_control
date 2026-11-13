@@ -204,6 +204,11 @@ MotionControllerRos::MotionControllerRos(const rclcpp::NodeOptions & options)
       }
     }, controller_);
 
+  // Root configuration remains owned by this node. The helper only exposes the
+  // already-built runtime's declared slots through ROS services and status topics.
+  slot_manager_ros_ =
+    std::make_unique<rpp_ros2::SlotManagerRos<rpp::ScriptRuntime<>>>(*this, *runtime_);
+
   bool expose_developer_topics = this->declare_parameter(
         "expose_developer_topics", false);
   rcl_interfaces::msg::ParameterDescriptor debug_descriptor;

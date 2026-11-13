@@ -13,6 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rpp_cpp REQUIRED)
+find_package(rpp_ros2 REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rcl_interfaces REQUIRED)
 find_package(builtin_interfaces REQUIRED)
@@ -34,6 +35,7 @@ target_link_libraries(rpp_control
   PUBLIC
   rclcpp::rclcpp
   rpp_cpp::rpp_cpp
+  rpp_ros2::rpp_ros2
   ${rcl_interfaces_TARGETS}
   ${builtin_interfaces_TARGETS}
   ${geometry_msgs_TARGETS}

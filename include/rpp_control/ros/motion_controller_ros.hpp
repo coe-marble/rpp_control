@@ -9,6 +9,7 @@
 #include <rpp_cpp/plugin.hpp>
 #include <rpp_cpp/component_runtime_builder.hpp>
 #include <rpp_cpp/logger.hpp>
+#include <rpp_ros2/slot_manager_ros.hpp>
 #include <std_srvs/srv/set_bool.hpp>
 
 #include "ros_defs.hpp"
@@ -27,6 +28,8 @@ class MotionControllerRos : public rclcpp::Node {
 private:
   std::shared_ptr<rpp::RppLogger> logger_;
   std::unique_ptr<rpp::ScriptRuntime<>> runtime_;
+  // Declared after runtime_ so it is destroyed first and never outlives it.
+  std::unique_ptr<rpp_ros2::SlotManagerRos<rpp::ScriptRuntime<>>> slot_manager_ros_;
   const rpp::ComponentContext * context_ = nullptr;
 
 public:

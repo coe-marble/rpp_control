@@ -121,29 +121,30 @@ public:
     RPP_LOG_DEBUG(*logger_,
                     "Configuring motion controller active_dofs=0x%x.",
                     static_cast<unsigned int>(active_dofs_));
-    controller_context_ = &context_->get_subcomponent_context("controller");
-    allocator_context_ = &context_->get_subcomponent_context("allocator");
+    const auto & controller_context = context_->get_subcomponent_context("controller");
+    const auto & allocator_context = context_->get_subcomponent_context("allocator");
     if (activate_on_start_) {
-      controller_context_->activate().require_success(
+      controller_context.activate().require_success(
                         "MotionController controller activation");
-      const auto allocator_activation = allocator_context_->activate();
+      const auto allocator_activation = allocator_context.activate();
       if (!allocator_activation.success) {
-        (void)controller_context_->deactivate();
+        (void)controller_context.deactivate();
         allocator_activation.require_success("MotionController allocator activation");
       }
     }
 
-                // A SubcomponentContext returns either a native implementation
-                // or an adapter-client proxy through the declared interface.
-    controller_ = controller_context_->template get_instance<ControllerComponent>();
-    allocator_ = allocator_context_->template get_instance<AllocatorComponent>();
-    if (!controller_ || !allocator_) {
+    // Validate the configured interfaces without retaining either component.
+    if (!controller_context.template get_instance<ControllerComponent>() ||
+      !allocator_context.template get_instance<AllocatorComponent>())
+    {
       throw std::runtime_error(
                         "MotionController requires controller and allocator components.");
     }
-    const auto num_commands = allocator_->outputSize();
-    RPP_LOG_INFO(*logger_, "Allocator output size: %d", num_commands);
-    state_live_.commands.resize(num_commands);
+    if (auto allocator = context_->template get_active_component<AllocatorComponent>("allocator")) {
+      const auto num_commands = allocator->outputSize();
+      RPP_LOG_INFO(*logger_, "Allocator output size: %d", num_commands);
+      state_live_.commands.resize(num_commands);
+    }
 
     curr_state_msg_ = InputMessage{};
     ref_state_msg_ = InputMessage{};
@@ -163,6 +164,19 @@ public:
 
     if (!(dt > 0.0) || !std::isfinite(dt)) {
       return stop_with_warning("Invalid control-loop time step. Stopping.");
+    }
+
+    // Components are intentionally obtained for this step only. A slot switch
+    // therefore takes effect on the next update without a cached old instance.
+    auto controller = context_->template get_active_component<ControllerComponent>("controller");
+    auto allocator = context_->template get_active_component<AllocatorComponent>("allocator");
+    if (!controller || !allocator) {
+      clear_outputs();
+      return false;
+    }
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      state_live_.commands.resize(allocator->outputSize());
     }
 
     const auto curr_time_sec = clock_->now_seconds();
@@ -223,7 +237,7 @@ public:
     );
 
     try {
-      auto controller_command = controller_->step(
+      auto controller_command = controller->step(
                         ref_state_msg_.as_const(),
                         curr_state_msg_.as_const(),
                         enabler_odom_msg_.as_const(), dt);
@@ -246,7 +260,7 @@ public:
                         allocation_dofs, false,
                         state_locked_.wrench_selection, enabler_odom_msg_.twist()
       );
-      auto allocated_result = allocator_->allocate(
+      auto allocated_result = allocator->allocate(
                         requested_wrench.shallow_copy(),
                         curr_state_msg_.as_const(),
                         enabler_odom_msg_.twist().as_const(),
@@ -272,16 +286,25 @@ public:
       RPP_LOG_ERROR_ONCE(*logger_,
                         "Control update failed: %s. Stopping.", exception.what());
       clear_outputs();
-      reset_controller();
+      reset_controller(*controller);
       return false;
     } catch (...) {
       RPP_LOG_ERROR_ONCE(*logger_,
                         "Control update failed with an unknown error. Stopping.");
       clear_outputs();
-      reset_controller();
+      reset_controller(*controller);
       return false;
     }
     return true;
+  }
+
+  [[nodiscard]] bool is_active() const
+  {
+    return configured_ &&
+           static_cast<bool>(context_->template get_active_component<ControllerComponent>(
+        "controller")) &&
+           static_cast<bool>(context_->template get_active_component<AllocatorComponent>(
+        "allocator"));
   }
 
   void start()
@@ -1058,19 +1081,22 @@ private:
     return false;
   }
 
-  void reset_controller()
+  void reset_controller(ControllerComponent & controller)
   {
-    if (!controller_) {
-      return;
-    }
     try {
-      controller_->reset();
+      controller.reset();
     } catch (const std::exception & exception) {
       RPP_LOG_ERROR_ONCE(*logger_,
                         "Controller reset failed: %s.", exception.what());
     } catch (...) {
       RPP_LOG_ERROR_ONCE(*logger_, "Controller reset failed.");
     }
+  }
+
+  void reset_controller()
+  {
+    auto controller = context_->template get_active_component<ControllerComponent>("controller");
+    if (controller) {reset_controller(*controller);}
   }
 
   void update_error(
@@ -1172,11 +1198,6 @@ private:
   typename ControllerIO::State state_locked_;
   typename ControllerIO::Error errors_;
   DebugSnapshotBuffer debug_snapshot_buffer_{};
-
-  const rpp::SubcomponentContext * controller_context_{nullptr};
-  const rpp::SubcomponentContext * allocator_context_{nullptr};
-  std::shared_ptr<ControllerComponent> controller_;
-  std::shared_ptr<AllocatorComponent> allocator_;
 
   std::array<SignalStatus, Dim::value> current_wrench_selection_;
   std::array<SignalStatus, Dim::value> current_twist_selection_;
