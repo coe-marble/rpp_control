@@ -17,7 +17,7 @@ fi
 rosdep update --rosdistro lyrical
 rosdep install --from-paths libraries/rpp_control rpp_dev/src/rpp_cpp libraries/marble_control_msgs --ignore-src --rosdistro lyrical -r -y
 
-colcon build --base-paths rpp_dev/src/rpp_cpp libraries/marble_control_msgs \
+colcon build --base-paths rpp_dev/src/rpp_cpp libraries/marble_control_msgs rpp_dev/src/rpp_ros2 \
   --symlink-install --cmake-args -DBUILD_TESTING=OFF \
   -DPython3_EXECUTABLE=/opt/rpp-test-venv/bin/python
 source install/setup.bash
