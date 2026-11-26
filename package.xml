@@ -3,21 +3,24 @@
 <package format="3">
   <name>rpp_control</name>
   <version>0.0.1</version>
-  <description>TODO: Package description</description>
+  <description>ROS-independent RPP control and reference plugins.</description>
   <maintainer email="luka.mandic@fer.hr">luka</maintainer>
   <license>TODO: License declaration</license>
-
+  <depend>rpp_cpp</depend>
+  <depend>rpp_interfaces</depend>
+  <depend>rpp_ros2</depend>
   <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>nav2_msgs</depend>
   <depend>rcl_interfaces</depend>
   <depend>builtin_interfaces</depend>
-  <depend>rpp_cpp</depend>
-  <depend>rpp_ros2</depend>
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
   <depend>nav_msgs</depend>
-  <depend>eigen</depend>
-  <depend>marble_control_msgs</depend>
+  <depend>rpp_ros_interfaces</depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
   <buildtool_depend>ament_cmake</buildtool_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
@@ -25,6 +28,7 @@
   <export>
     <build_type>ament_cmake</build_type>
     <rpp_dependencies>
+      <depend>rpp_interfaces</depend>
     </rpp_dependencies>
   </export>
 </package>

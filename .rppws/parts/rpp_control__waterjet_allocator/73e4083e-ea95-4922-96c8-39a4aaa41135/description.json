@@ -1,7 +1,7 @@
 {
     "Id": "73e4083e-ea95-4922-96c8-39a4aaa41135",
     "Name": "WaterjetAllocator_comp",
-    "PluginType": "rpp_control::MotionControllerAllocator2D",
+    "PluginType": "rpp_interfaces::ActuationMapper",
     "PluginName": "rpp_control::WaterjetAllocator",
     "Library": "rpp_control",
     "SubcomponentSpec": {},

@@ -1,0 +1,10 @@
+{
+    "Id": "9afc2b7d-d1b5-41bd-a5b6-dd86ff5bd417",
+    "Name": "progress_monitor",
+    "PluginType": "rpp_interfaces::MissionMonitor",
+    "PluginName": "rpp_control::ProgressMissionMonitor",
+    "Library": "rpp_control",
+    "SubcomponentSpec": {},
+    "Subcomponents": {},
+    "ParentComponentInfo": null
+}

@@ -1,7 +1,7 @@
 {
     "Id": "e5fc835c-0899-48eb-8628-742f3d478818",
     "Name": "PIDPoseController2D_comp",
-    "PluginType": "rpp_control::PoseController2D",
+    "PluginType": "rpp_interfaces::ControlLaw",
     "PluginName": "rpp_control::PIDPoseController2D",
     "Library": "rpp_control",
     "SubcomponentSpec": {},

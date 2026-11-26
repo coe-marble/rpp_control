@@ -7,7 +7,6 @@ for package in rpp_common rpp_plugin_registrator rpp_orchestrator rpp_py rpp_cli
   python -m pip install --no-deps -e "rpp_dev/src/$package"
 done
 
-
 # Resolve the ROS dependencies declared by this library and the C++ runtime.
 apt-get update
 apt-get install --no-install-recommends -y python3-rosdep
@@ -15,9 +14,9 @@ if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
   rosdep init
 fi
 rosdep update --rosdistro lyrical
-rosdep install --from-paths libraries/rpp_control rpp_dev/src/rpp_cpp libraries/marble_control_msgs --ignore-src --rosdistro lyrical -r -y
+rosdep install --from-paths libraries/rpp_control rpp_dev/src/rpp_cpp rpp_dev/src/rpp_interfaces rpp_dev/src/rpp_ros2 libraries/rpp_ros_interfaces --ignore-src --rosdistro lyrical -r -y
 
-colcon build --base-paths rpp_dev/src/rpp_cpp libraries/marble_control_msgs rpp_dev/src/rpp_ros2 \
+colcon build --base-paths rpp_dev/src/rpp_cpp rpp_dev/src/rpp_interfaces libraries/rpp_ros_interfaces rpp_dev/src/rpp_ros2 \
   --symlink-install --cmake-args -DBUILD_TESTING=OFF \
   -DPython3_EXECUTABLE=/opt/rpp-test-venv/bin/python
 source install/setup.bash
@@ -26,12 +25,10 @@ rpp init-home
 
 # Generate interfaces before building the ROS adapter. Register implementations
 # after its headers and shared libraries have been installed.
-rpp library create rpp_control
-rpp library rpp_control register "$PWD/libraries/rpp_control/plugin_types/controllers.capnp" --type
+rpp library register "$PWD/rpp_dev/src/rpp_interfaces" --link
 colcon build --base-paths libraries/rpp_control --symlink-install --cmake-args \
   -DBUILD_TESTING=ON -DPython3_EXECUTABLE=/opt/rpp-test-venv/bin/python
 source install/setup.bash
-rpp library unregister rpp_control
 rpp library register "$PWD/libraries/rpp_control" --link
 
 colcon test --packages-select rpp_control --event-handlers console_direct+ \

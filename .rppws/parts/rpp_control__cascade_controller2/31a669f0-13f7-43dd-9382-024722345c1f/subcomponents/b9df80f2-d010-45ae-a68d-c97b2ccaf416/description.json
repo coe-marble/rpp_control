@@ -1,0 +1,14 @@
+{
+    "Id": "b9df80f2-d010-45ae-a68d-c97b2ccaf416",
+    "Name": "pure_pursuit",
+    "LinkedComponentId": "d31a392e-9662-4b80-9ebf-c93f1cc390de",
+    "LinkedComponentWorkspace": "rpp_control",
+    "ParentComponentInfo": {
+        "Id": "31a669f0-13f7-43dd-9382-024722345c1f",
+        "PluginType": "rpp_interfaces::ControlLaw",
+        "PluginName": "rpp_control::CascadeController2",
+        "SlotName": "ctl1",
+        "Library": "rpp_control",
+        "IsLinked": false
+    }
+}

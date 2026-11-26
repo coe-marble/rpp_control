@@ -1,6 +1,6 @@
 #include <type_traits>
 #include <gtest/gtest.h>
-#include <rpp_control/ros/command_types.hpp>
+#include <rpp_control/legacy/ros/command_types.hpp>
 
 namespace
 {

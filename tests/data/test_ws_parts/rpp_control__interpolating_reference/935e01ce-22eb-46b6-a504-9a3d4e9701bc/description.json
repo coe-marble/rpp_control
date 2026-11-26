@@ -1,0 +1,10 @@
+{
+    "Id": "935e01ce-22eb-46b6-a504-9a3d4e9701bc",
+    "Name": "InterpolatingReference_comp",
+    "PluginType": "rpp_interfaces::ReferenceGenerator",
+    "PluginName": "rpp_control::InterpolatingReference",
+    "Library": "rpp_control",
+    "SubcomponentSpec": {},
+    "Subcomponents": {},
+    "ParentComponentInfo": null
+}

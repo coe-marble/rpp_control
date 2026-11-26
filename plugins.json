@@ -2,30 +2,89 @@
     "Library": "rpp_control",
     "Plugins": [
         {
+            "Name": "RegulatedPurePursuitController2D",
+            "Path": "plugins/controllers/regulated_pure_pursuit_controller_2d.hpp",
+            "Type": "file",
+            "PluginType": "rpp_interfaces::ControlLaw"
+        },
+        {
             "Name": "PIDPoseController2D",
-            "Path": "plugins/controllers/pid_pose_controller.hpp",
-            "Type": "file"
+            "Path": "plugins/controllers/pid_pose_controller_2d.hpp",
+            "Type": "file",
+            "PluginType": "rpp_interfaces::ControlLaw"
         },
         {
             "Name": "PIDTwistController2D",
-            "Path": "plugins/controllers/pid_twist_controller.hpp",
-            "Type": "file"
+            "Path": "plugins/controllers/pid_twist_controller_2d.hpp",
+            "Type": "file",
+            "PluginType": "rpp_interfaces::ControlLaw"
         },
         {
-            "Name": "CascadeController2D",
-            "Path": "plugins/controllers/cascade_controller.hpp",
-            "Type": "file"
+            "Name": "CascadeController2",
+            "Path": "plugins/controllers/cascade_controller_2.hpp",
+            "Type": "file",
+            "PluginType": "rpp_interfaces::ControlLaw"
+        },
+        {
+            "Name": "WrenchController2D",
+            "Path": "plugins/controllers/wrench_controller_2d.hpp",
+            "Type": "file",
+            "PluginType": "rpp_interfaces::ControlLaw"
         },
         {
             "Name": "WaterjetAllocator",
             "Path": "plugins/allocators/waterjet_allocator.hpp",
+            "Type": "file",
+            "PluginType": "rpp_interfaces::ActuationMapper"
+        },
+        {
+            "Name": "BufferedStateProvider",
+            "Path": "plugins/state_providers/buffered_state_provider.hpp",
+            "PluginType": "rpp_interfaces::StateProvider",
+            "Type": "file"
+        },
+        {
+            "Name": "PoseMissionMonitor",
+            "Path": "plugins/mission_monitors/pose_mission_monitor.hpp",
+            "PluginType": "rpp_interfaces::MissionMonitor",
+            "Type": "file"
+        },
+        {
+            "Name": "ProgressMissionMonitor",
+            "Path": "plugins/mission_monitors/progress_mission_monitor.hpp",
+            "PluginType": "rpp_interfaces::MissionMonitor",
+            "Type": "file"
+        },
+        {
+            "Name": "InterpolatingReference",
+            "Path": "plugins/reference_generators/interpolating_reference.hpp",
+            "PluginType": "rpp_interfaces::ReferenceGenerator",
+            "Type": "file"
+        },
+        {
+            "Name": "PlanarPathReference",
+            "Path": "plugins/reference_generators/planar_path_reference.hpp",
+            "PluginType": "rpp_interfaces::ReferenceGenerator",
+            "Type": "file"
+        },
+        {
+            "Name": "PIDPoseController3D",
+            "Path": "plugins/controllers/pid_pose_controller_3d.hpp",
+            "PluginType": "rpp_interfaces::ControlLaw",
+            "Type": "file"
+        },
+        {
+            "Name": "PIDTwistController3D",
+            "Path": "plugins/controllers/pid_twist_controller_3d.hpp",
+            "PluginType": "rpp_interfaces::ControlLaw",
+            "Type": "file"
+        },
+        {
+            "Name": "CascadeController3",
+            "Path": "plugins/controllers/cascade_controller_3.hpp",
+            "PluginType": "rpp_interfaces::ControlLaw",
             "Type": "file"
         }
     ],
-    "PluginTypes": [
-        {
-            "Path": "plugin_types/controllers.capnp",
-            "Type": "file"
-        }
-    ]
+    "PluginTypes": []
 }

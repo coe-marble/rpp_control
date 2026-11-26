@@ -1,0 +1,32 @@
+{
+    "Id": "eb1fb05e-b825-4463-97ec-dfa99cd5b786",
+    "Name": "CascadeController2_comp",
+    "PluginType": "rpp_interfaces::ControlLaw",
+    "PluginName": "rpp_control::CascadeController2",
+    "Library": "rpp_control",
+    "SubcomponentSpec": {
+        "ctl1": "rpp_interfaces::ControlLaw",
+        "ctl0": "rpp_interfaces::ControlLaw"
+    },
+    "Subcomponents": {
+        "ctl0": {
+            "Id": "8ba8c2a4-8332-495a-bf7e-a507cbc0ee32",
+            "PluginType": "rpp_interfaces::ControlLaw",
+            "PluginName": "rpp_control::PIDTwistController2D",
+            "SlotName": "ctl0",
+            "Library": "rpp_control",
+            "Folder": "../../rpp_control__p_i_d_twist_controller2_d/c67287af-7a07-4c08-9f6e-4f0563d895a6",
+            "IsLinked": true
+        },
+        "ctl1": {
+            "Id": "e3b33c6d-9caa-40a6-92ec-3a970bee1afd",
+            "PluginType": "rpp_interfaces::ControlLaw",
+            "PluginName": "rpp_control::PIDPoseController2D",
+            "SlotName": "ctl1",
+            "Library": "rpp_control",
+            "Folder": "../../rpp_control__p_i_d_pose_controller2_d/e5fc835c-0899-48eb-8628-742f3d478818",
+            "IsLinked": true
+        }
+    },
+    "ParentComponentInfo": null
+}

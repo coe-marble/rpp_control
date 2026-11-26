@@ -1,0 +1,10 @@
+{
+    "Id": "534302bf-0c2d-49a5-bb36-d65749ecc1a7",
+    "Name": "path_reference",
+    "PluginType": "rpp_interfaces::ReferenceGenerator",
+    "PluginName": "rpp_control::PlanarPathReference",
+    "Library": "rpp_control",
+    "SubcomponentSpec": {},
+    "Subcomponents": {},
+    "ParentComponentInfo": null
+}

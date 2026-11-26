@@ -2,8 +2,8 @@
 #include <limits>
 #include <memory>
 #include <gtest/gtest.h>
-#include <rpp_control/ros/command_age_filter.hpp>
-#include <rpp_control/ros/command_types.hpp>
+#include <rpp_control/legacy/ros/command_age_filter.hpp>
+#include <rpp_control/legacy/ros/command_types.hpp>
 
 namespace
 {
