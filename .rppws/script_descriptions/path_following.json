@@ -1,0 +1,36 @@
+{
+    "ScriptPath": "include/rpp_control/control_script.hpp",
+    "Language": "cpp",
+    "Spec": {
+        "controller": "List[rpp_interfaces::ControlLaw]",
+        "allocator": "List[rpp_interfaces::ActuationMapper]",
+        "state_provider": "rpp_interfaces::StateProvider",
+        "reference": "List[rpp_interfaces::ReferenceGenerator]",
+        "mission_monitor": "List[rpp_interfaces::MissionMonitor]"
+    },
+    "Configurations": {
+        "Default": {
+            "Components": {
+                "controller": [
+                    {"Id": "31a669f0-13f7-43dd-9382-024722345c1f", "PluginName": "rpp_control::CascadeController2"}
+                ],
+                "allocator": [
+                    {"Id": "73e4083e-ea95-4922-96c8-39a4aaa41135", "PluginName": "rpp_control::WaterjetAllocator"}
+                ],
+                "state_provider": [
+                    {"Id": "65eb28d8-935c-4dbd-b7e6-10d3a535cd4b", "PluginName": "rpp_control::BufferedStateProvider"}
+                ],
+                "reference": [
+                    {"Id": "4eefdb33-7749-41af-8bc9-d04e4e342497", "PluginName": "rpp_control::PlanarPathReference"}
+                ],
+                "mission_monitor": [
+                    {"Id": "b60535a5-0dbe-4176-ac71-5a13d3e6c08f", "PluginName": "rpp_control::PoseMissionMonitor"},
+                    {"Id": "9afc2b7d-d1b5-41bd-a5b6-dd86ff5bd417", "PluginName": "rpp_control::ProgressMissionMonitor"}
+                ]
+            }
+        }
+    },
+    "ActiveConfiguration": "Default",
+    "ScriptLibrary": "rpp_control",
+    "ScriptName": "path_following"
+}

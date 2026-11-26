@@ -1,0 +1,10 @@
+{
+    "Id": "903ebcf9-bf2b-47f9-b6ea-68026aa80fef",
+    "Name": "loose_goal_monitor",
+    "PluginType": "rpp_interfaces::MissionMonitor",
+    "PluginName": "rpp_control::PoseMissionMonitor",
+    "Library": "rpp_control",
+    "SubcomponentSpec": {},
+    "Subcomponents": {},
+    "ParentComponentInfo": null
+}

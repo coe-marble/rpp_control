@@ -1,0 +1,32 @@
+{
+    "Id": "31a669f0-13f7-43dd-9382-024722345c1f",
+    "Name": "path_cascade",
+    "PluginType": "rpp_interfaces::ControlLaw",
+    "PluginName": "rpp_control::CascadeController2",
+    "Library": "rpp_control",
+    "SubcomponentSpec": {
+        "ctl0": "rpp_interfaces::ControlLaw",
+        "ctl1": "rpp_interfaces::ControlLaw"
+    },
+    "Subcomponents": {
+        "ctl0": {
+            "Id": "51ba1e86-2365-4309-8b55-dca435b498cb",
+            "PluginType": "rpp_interfaces::ControlLaw",
+            "PluginName": "rpp_control::PIDTwistController2D",
+            "SlotName": "ctl0",
+            "Library": "rpp_control",
+            "Folder": "../../rpp_control__p_i_d_twist_controller2_d/c67287af-7a07-4c08-9f6e-4f0563d895a6",
+            "IsLinked": true
+        },
+        "ctl1": {
+            "Id": "b9df80f2-d010-45ae-a68d-c97b2ccaf416",
+            "PluginType": "rpp_interfaces::ControlLaw",
+            "PluginName": "rpp_control::RegulatedPurePursuitController2D",
+            "SlotName": "ctl1",
+            "Library": "rpp_control",
+            "Folder": "../../rpp_control__regulated_pure_pursuit_controller2_d/d31a392e-9662-4b80-9ebf-c93f1cc390de",
+            "IsLinked": true
+        }
+    },
+    "ParentComponentInfo": null
+}

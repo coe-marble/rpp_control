@@ -1,0 +1,10 @@
+{
+    "Id": "65eb28d8-935c-4dbd-b7e6-10d3a535cd4b",
+    "Name": "StateProvider_comp",
+    "PluginType": "rpp_interfaces::StateProvider",
+    "PluginName": "rpp_control::BufferedStateProvider",
+    "Library": "rpp_control",
+    "SubcomponentSpec": {},
+    "Subcomponents": {},
+    "ParentComponentInfo": null
+}

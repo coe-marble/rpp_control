@@ -3,40 +3,45 @@
 #include <cmath>
 #include <stdexcept>
 
-#include <rpp_cpp/plugin.hpp>
+#include <rpp_cpp/parameter_description.hpp>
+#include <rpp_cpp/rpp_param_struct_headers.hpp>
 
 #include "controller_handover.hpp"
-#include "control_defs.hpp"
 
 
 namespace rpp_control
 {
 
 RPP_PARAM_STRUCT(PIDParameters,
-        RPP_MEMBER(FP_TYPE, kp, 0.0),
-        RPP_MEMBER(FP_TYPE, ki, 0.0),
-        RPP_MEMBER(FP_TYPE, kd, 0.0),
-        RPP_MEMBER(FP_TYPE, output_limit, 0.0),
-        RPP_MEMBER(FP_TYPE, integral_limit, 0.0),
-        RPP_MEMBER(FP_TYPE, anti_windup_gain, 1.0),
-        RPP_MEMBER(FP_TYPE, derivative_filter_coefficient, 0.0)
+        RPP_MEMBER(double, kp, 0.0),
+        RPP_MEMBER(double, ki, 0.0),
+        RPP_MEMBER(double, kd, 0.0),
+        RPP_MEMBER(double, output_limit, 0.0),
+        RPP_MEMBER(double, integral_limit, 0.0),
+        RPP_MEMBER(double, anti_windup_gain, 1.0),
+        RPP_MEMBER(double, derivative_filter_coefficient, 0.0)
 )
 
 
 class PID
 {
 private:
-  PIDParameters params_;
+  PIDParameters params_{};
+  bool validate_step_ = true;
   ControllerAxisErrorInfo error_info_;
+  bool step_valid_ = false;
+  bool step_limited_ = false;
 
 public:
-  explicit PID(const PIDParameters & params)
-  : params_(params)
+  PID() = default;
+
+  explicit PID(const PIDParameters & params, bool validate_step = true)
+  : params_(params), validate_step_(validate_step)
   {
     validate_parameters(params_);
   }
 
-  virtual ~PID() = default;
+  ~PID() = default;
 
   void set_parameters(const PIDParameters & params)
   {
@@ -44,19 +49,31 @@ public:
     params_ = params;
   }
 
-  // angular: ref and state are angles in rad and the error is wrapped to [-pi, pi].
-  FP_TYPE step(FP_TYPE ref, FP_TYPE state, FP_TYPE dt, bool angular = false)
+  // tracking_error is the previous applied minus requested command, in PID output units.
+  // angular wraps the reference error to [-pi, pi].
+  double step(
+    double ref, double state, double dt, bool angular = false, double tracking_error = 0.0)
   {
-    if (!std::isfinite(ref) || !std::isfinite(state) ||
-      !std::isfinite(dt) || dt <= 0.0)
+    step_valid_ = false;
+    step_limited_ = false;
+    if (validate_step_ && (!std::isfinite(ref) || !std::isfinite(state) ||
+      !std::isfinite(dt) || dt <= 0.0))
     {
       reset();
       return 0.0;
     }
 
     auto candidate = error_info_;
+    if (params_.ki != 0.0 && params_.anti_windup_gain != 0.0 && tracking_error != 0.0) {
+      candidate.integral_error += (params_.anti_windup_gain * tracking_error) / params_.ki;
+      if (params_.integral_limit > 0.0) {
+        candidate.integral_error = std::clamp(
+          candidate.integral_error, -params_.integral_limit, params_.integral_limit);
+      }
+    }
+    const double tracked_integral = candidate.integral_error;
     if (!update_controller_axis_error_info(
-                    candidate, ref, state, dt, params_.ki != 0.0, angular))
+                    candidate, ref, state, dt, params_.ki != 0.0, angular, validate_step_))
     {
       reset();
       return 0.0;
@@ -74,17 +91,18 @@ public:
         candidate.previous_derivative;
     }
 
-    FP_TYPE output = params_.kp * candidate.previous_error +
+    double output = params_.kp * candidate.previous_error +
       params_.ki * candidate.integral_error +
       params_.kd * candidate.previous_derivative;
-    if (!std::isfinite(output)) {
+    if (validate_step_ && !std::isfinite(output)) {
       reset();
       return 0.0;
     }
 
     if (params_.output_limit > 0.0) {
-      const FP_TYPE integral_contribution = params_.ki *
-        (candidate.integral_error - error_info_.integral_error);
+      step_limited_ = std::abs(output) > params_.output_limit;
+      const double integral_contribution = params_.ki *
+        (candidate.integral_error - tracked_integral);
       const bool grows_upper_saturation =
         output > params_.output_limit &&
         integral_contribution > 0.0;
@@ -92,9 +110,9 @@ public:
         output < -params_.output_limit &&
         integral_contribution < 0.0;
       if (grows_upper_saturation || grows_lower_saturation) {
-        candidate.integral_error = error_info_.integral_error +
+        candidate.integral_error = tracked_integral +
           (1.0 - params_.anti_windup_gain) *
-          (candidate.integral_error - error_info_.integral_error);
+          (candidate.integral_error - tracked_integral);
         output = params_.kp * candidate.previous_error +
           params_.ki * candidate.integral_error +
           params_.kd * candidate.previous_derivative;
@@ -104,13 +122,19 @@ public:
     }
 
     error_info_ = candidate;
+    step_valid_ = true;
     return output;
   }
 
   void reset()
   {
     error_info_ = {};
+    step_valid_ = false;
+    step_limited_ = false;
   }
+
+  bool last_step_valid() const noexcept {return step_valid_;}
+  bool last_step_limited() const noexcept {return step_limited_;}
 
   [[nodiscard]] ControllerAxisErrorInfo error_info() const
   {
@@ -123,6 +147,8 @@ public:
       throw std::invalid_argument("PID handover state must be finite.");
     }
     error_info_ = state;
+    step_valid_ = false;
+    step_limited_ = false;
   }
 
 private:

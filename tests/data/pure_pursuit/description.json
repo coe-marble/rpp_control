@@ -1,0 +1,10 @@
+{
+    "Id": "b73fca71-ce1f-4725-9d47-602ef35d6eaf",
+    "Name": "pure_pursuit",
+    "PluginType": "rpp_interfaces::ControlLaw",
+    "PluginName": "rpp_control::RegulatedPurePursuitController2D",
+    "Library": "rpp_control",
+    "SubcomponentSpec": {},
+    "Subcomponents": {},
+    "ParentComponentInfo": null
+}

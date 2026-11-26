@@ -8,6 +8,5 @@ class ComponentParameters:
     max_angle = 0.5235987756
     mass = 450.0
     z_cg = 0.4
-    filter_time_constant = 0.4
     metacentric_height = 0.3
     max_safe_roll_deg = 30.0

@@ -47,9 +47,9 @@ jobs:
       - name: Check out control message definitions
         uses: actions/checkout@v4
         with:
-          repository: coe-marble/marble_control_msgs
+          repository: coe-marble/rpp_ros_interfaces
           ref: main
-          path: libraries/marble_control_msgs
+          path: libraries/rpp_ros_interfaces
           persist-credentials: false
       - name: Run library CI
         run: bash libraries/rpp_control/.github/scripts/ci.sh

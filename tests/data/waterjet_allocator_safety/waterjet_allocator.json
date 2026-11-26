@@ -1,5 +1,5 @@
 {
-  "ScriptPath": "include/rpp_control/motion_controller2d.hpp",
+  "ScriptPath": "include/rpp_control/legacy/motion_controller2d_impl.hpp",
   "Language": "cpp",
   "Configurations": {
     "Jetski": {
@@ -15,6 +15,6 @@
   },
   "ActiveConfiguration": "Jetski",
   "Spec": {
-    "allocator": "rpp_control::MotionControllerAllocator2D"
+    "allocator": "rpp_interfaces::ActuationMapper"
   }
 }

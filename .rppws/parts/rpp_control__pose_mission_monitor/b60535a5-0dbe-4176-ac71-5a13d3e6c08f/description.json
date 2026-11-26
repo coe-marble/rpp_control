@@ -1,0 +1,10 @@
+{
+    "Id": "b60535a5-0dbe-4176-ac71-5a13d3e6c08f",
+    "Name": "goal_monitor",
+    "PluginType": "rpp_interfaces::MissionMonitor",
+    "PluginName": "rpp_control::PoseMissionMonitor",
+    "Library": "rpp_control",
+    "SubcomponentSpec": {},
+    "Subcomponents": {},
+    "ParentComponentInfo": null
+}

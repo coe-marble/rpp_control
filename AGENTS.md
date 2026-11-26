@@ -47,6 +47,8 @@ Before editing, inspect:
 - Do not allocate memory, block, log excessively, or perform file/network
   I/O inside real-time-sensitive update loops.
 - Avoid unbounded containers and operations in real-time paths.
+- Prepare slot-name strings, route validity, dependencies, and buffers before ticks.
+  Keep goal-cancellation callbacks and transition logging on the executor.
 - Use monotonic or ROS time consistently according to package semantics.
 - Handle invalid, stale, missing, NaN, and infinite inputs explicitly.
 - Validate command limits before publishing or writing commands.
@@ -86,6 +88,45 @@ Before editing, inspect:
   are supported.
 - Apply runtime parameter updates atomically.
 - Do not leave the controller partially updated after validation fails.
+
+## Source Organization
+
+- Keep library and ROS helper headers under `include/rpp_control/`, and source
+  implementations under `src/`.
+- `control_script.hpp` owns class declarations, binding types, and persistent state.
+  Keep nontrivial implementations in the corresponding `detail/` files.
+- `control_script_configuration.hpp` owns component configuration, horizon binding,
+  execution preparation, and actuator constraint configuration.
+- `control_script_lifecycle.hpp` owns activation, deactivation, instance access,
+  and lifecycle status queries.
+- `control_script_routing.hpp` owns field compatibility, exclusive writer checks,
+  and numeric connection planning. Keep lifecycle transitions and state restoration out.
+- `control_script_goals.hpp` owns goal submission, validation, cancellation, and completion.
+- `control_script_execution.hpp` owns numeric stages, runtime actuator limiting,
+  feedback, and resets.
+- `control_script_state.hpp` owns layout and buffer access, auxiliary snapshots,
+  and compatible state restoration across configuration changes.
+- `auxiliary_state.hpp` owns generic snapshot assembly. `control_auxiliary_state.hpp`
+  adds controller history fields. Keep controller and allocator snapshots separate.
+- `src/ros/control_script_node.cpp` owns ROS callbacks and worker synchronization.
+  Its class declaration belongs in `include/rpp_control/ros/control_script_node.hpp`.
+  Put ROS conversion and snapshot helpers in
+  `include/rpp_control/ros/control_script_node_helpers.hpp`.
+- `include/rpp_control/ros/control_script_time.hpp` owns time conversion, validation, freshness,
+  and tick timing calculations. Keep this logic out of the node and routing files.
+- `include/rpp_control/ros/navigation_interface.hpp` and `src/ros/navigation_interface.cpp`
+  own optional navigation subscriptions, layout matching, and ROS-to-goal conversion.
+  Receive `ControlScriptNode` directly and use C++ calls for layouts and goals;
+  do not communicate with the owning node through internal publishers/subscribers.
+  Run this work on the executor, outside the numeric worker.
+- `src/ros/navigation_follow_path.cpp` owns the FollowPath action adapter.
+  Check the selected generator's setPath feature during construction and on
+  each request/submission. Forward the global path unchanged in meaning;
+  pruning belongs to the reference generator and lookahead/control to the
+  outer controller. Action heartbeats extend deadlines without restaging paths.
+- `reference_claims.hpp` owns exclusive interface tokens. `control_script_references.cpp`
+  owns claim/release services and per-interface cancellation. Execution enable
+  and reference ownership are independent; do not introduce control tokens.
 
 ## Testing
 

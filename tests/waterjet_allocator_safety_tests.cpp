@@ -11,7 +11,8 @@
 
 #include "gtest/gtest.h"
 #include "rpp_cpp/component_runtime_builder.hpp"
-#include "rpp_plugin_types/rpp_control/MotionControllerAllocator2D.hpp"
+#include "rpp_plugin_types/rpp_interfaces/ActuationMapper.hpp"
+#include "capnp_gen/rpp_interfaces/common/constants.capnp.h"
 
 namespace
 {
@@ -61,12 +62,14 @@ TEST(WaterjetAllocatorSafety, sweeps_normalized_surge_and_yaw_grid)
   ASSERT_TRUE(runtime.configure().success);
   const auto & context = runtime.get_context();
 
-  using Allocator = rpp_control::MotionControllerAllocator2D;
+  using Allocator = rpp_interfaces::ActuationMapper;
   const auto & allocator_context = context.get_subcomponent_context("allocator");
   ASSERT_TRUE(allocator_context.activate().success);
   const auto allocator = allocator_context.get_instance<Allocator>();
   ASSERT_NE(allocator, nullptr);
-  EXPECT_EQ(allocator->outputSize(), 2U);
+  auto description = allocator->getDesc();
+  EXPECT_EQ(description.control().fields().size(), 2U);
+  EXPECT_EQ(description.actuators().fields().size(), 2U);
 
   std::ofstream csv(std::filesystem::current_path() /
     "waterjet_allocator_safety_grid.csv");
@@ -84,32 +87,22 @@ TEST(WaterjetAllocatorSafety, sweeps_normalized_surge_and_yaw_grid)
       const double reference_surge = surge_normalized * k_max_thrust;
       const double reference_yaw = yaw_normalized * maximum_safe_yaw_wrench();
 
-      Allocator::Wrench2D reference;
-      reference.force().x() = reference_surge;
-      reference.force().y() = 0.0;
-      reference.torque() = reference_yaw;
+      rpp::List<double> command, state;
+      command.resize(3);
+      command[0] = reference_surge; command[1] = 0.0; command[2] = reference_yaw;
+      state.resize(3);
+      const auto allocation = allocator->commandMap(state, command, 100000000);
+      ASSERT_TRUE(std::get<2>(allocation) == ::schema::rpp_interfaces::CODE_OK ||
+        std::get<2>(allocation) == ::schema::rpp_interfaces::CODE_LIMITED);
+      const auto & actuators = std::get<0>(allocation);
+      const auto & realizedEstimate = std::get<1>(allocation);
+      ASSERT_EQ(actuators.size(), 2U);
 
-      Allocator::Odometry2D state;
-      state.twist().linear().x() = 0.0;
-      state.twist().linear().y() = 0.0;
-      state.twist().angular() = 0.0;
-
-      Allocator::Enabler2D enabler;
-      enabler.enableX() = true;
-      enabler.enableY() = false;
-      enabler.enableN() = true;
-
-      const auto allocation = allocator->allocate(
-        std::move(reference), std::move(state), std::move(enabler), 0.1);
-      const auto & commands = std::get<0>(allocation).data();
-      const auto & realized = std::get<1>(allocation);
-      ASSERT_EQ(commands.size(), 2U);
-
-      const double thrust_command = commands[0];
-      const double nozzle_command = commands[1];
-      const double realized_surge = realized.force().x();
-      const double realized_sway = realized.force().y();
-      const double realized_yaw = realized.torque();
+      const double thrust_command = actuators[0];
+      const double nozzle_command = actuators[1];
+      const double realized_surge = realizedEstimate[0];
+      const double realized_sway = realizedEstimate[1];
+      const double realized_yaw = realizedEstimate[2];
       const double realized_thrust = std::hypot(realized_surge, realized_sway);
       const bool saturated = std::abs(thrust_command) >= 1.0 - k_tolerance ||
         std::abs(nozzle_command) >= 1.0 - k_tolerance;

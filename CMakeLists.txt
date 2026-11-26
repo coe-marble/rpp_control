@@ -1,133 +1,92 @@
 cmake_minimum_required(VERSION 3.15)
 project(rpp_control)
 
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
-endif()
-
-if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 20)
-endif()
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# find dependencies
 find_package(ament_cmake REQUIRED)
 find_package(rpp_cpp REQUIRED)
-find_package(rpp_ros2 REQUIRED)
-find_package(rclcpp REQUIRED)
-find_package(rcl_interfaces REQUIRED)
-find_package(builtin_interfaces REQUIRED)
-find_package(geometry_msgs REQUIRED)
-find_package(std_msgs REQUIRED)
-find_package(std_srvs REQUIRED)
-find_package(nav_msgs REQUIRED)
-find_package(marble_control_msgs REQUIRED)
+find_package(rpp_interfaces REQUIRED)
 
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
+# Native plugin implementations are registered and compiled by RPP.
+add_library(rpp_control INTERFACE)
+target_compile_features(rpp_control INTERFACE cxx_std_17)
+target_link_libraries(rpp_control INTERFACE rpp_cpp::rpp_cpp rpp_interfaces::rpp_interfaces)
 
-add_library(rpp_control SHARED
-  src/motion_controller_ros.cpp
+target_include_directories(rpp_control INTERFACE
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
 )
-target_compile_features(rpp_control PUBLIC cxx_std_20)
-target_link_libraries(rpp_control
-  PUBLIC
-  rclcpp::rclcpp
-  rpp_cpp::rpp_cpp
-  rpp_ros2::rpp_ros2
-  ${rcl_interfaces_TARGETS}
-  ${builtin_interfaces_TARGETS}
-  ${geometry_msgs_TARGETS}
-  ${std_msgs_TARGETS}
-  ${std_srvs_TARGETS}
-  ${nav_msgs_TARGETS}
-  ${marble_control_msgs_TARGETS}
-)
-if(DEFINED ENV{RPP_HOME} AND NOT "$ENV{RPP_HOME}" STREQUAL "")
-  set(RPP_INTERFACES_CPP_DIR "$ENV{RPP_HOME}/interfaces/cpp")
-else()
-  set(RPP_INTERFACES_CPP_DIR "$ENV{HOME}/.rpp/interfaces/cpp")
+
+install(DIRECTORY include/ DESTINATION include)
+install(DIRECTORY plugins DESTINATION share/${PROJECT_NAME})
+install(FILES plugins.json DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY .rppws DESTINATION share/${PROJECT_NAME})
+install(TARGETS rpp_control EXPORT rpp_controlTargets)
+ament_export_targets(rpp_controlTargets)
+ament_export_include_directories(include)
+ament_export_dependencies(rpp_cpp rpp_interfaces)
+
+option(RPP_CONTROL_BUILD_ROS2 "Build the ROS 2 control nodes" ON)
+if(RPP_CONTROL_BUILD_ROS2)
+  find_package(Threads REQUIRED)
+  find_package(rpp_ros2 REQUIRED)
+  find_package(rclcpp REQUIRED)
+  find_package(rclcpp_action REQUIRED)
+  find_package(nav2_msgs REQUIRED)
+  find_package(rcl_interfaces REQUIRED)
+  find_package(builtin_interfaces REQUIRED)
+  find_package(geometry_msgs REQUIRED)
+  find_package(std_msgs REQUIRED)
+  find_package(std_srvs REQUIRED)
+  find_package(nav_msgs REQUIRED)
+  find_package(rpp_ros_interfaces REQUIRED)
+
+  add_executable(control_script_node src/ros/control_script_node.cpp
+    src/ros/control_script_monitors.cpp
+    src/ros/control_script_references.cpp src/ros/navigation_interface.cpp
+    src/ros/navigation_follow_path.cpp)
+  target_compile_features(control_script_node PRIVATE cxx_std_20)
+  target_link_libraries(control_script_node PRIVATE Threads::Threads rpp_control rpp_ros2::rpp_ros2
+    rclcpp::rclcpp rclcpp_action::rclcpp_action ${nav2_msgs_TARGETS}
+    ${rcl_interfaces_TARGETS} ${std_srvs_TARGETS} ${geometry_msgs_TARGETS} ${rpp_ros_interfaces_TARGETS})
+  install(TARGETS control_script_node DESTINATION lib/${PROJECT_NAME})
+  install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+
 endif()
 
-target_include_directories(rpp_control PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${RPP_INTERFACES_CPP_DIR}>
-    $<INSTALL_INTERFACE:include>
-)
-
-add_executable(motion_controller_node
-  src/motion_controller_node.cpp
-)
-
-target_link_libraries(motion_controller_node
-  rpp_control
-)
-
-install(
-  DIRECTORY include/
-  DESTINATION include
-)
-
-
-install(TARGETS rpp_control motion_controller_node
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION lib/${PROJECT_NAME}
-)
-ament_export_include_directories(include)
-
 if(BUILD_TESTING)
-
   find_package(ament_lint_auto REQUIRED)
   find_package(ament_cmake_gtest REQUIRED)
 
-
-  ament_add_gtest(test_command_types tests/command_types_tests.cpp)
-  target_include_directories(test_command_types PRIVATE include)
-  target_link_libraries(test_command_types ${geometry_msgs_TARGETS})
-
-  ament_add_gtest(test_command_age_filter tests/command_age_filter_tests.cpp)
-  target_compile_features(test_command_age_filter PRIVATE cxx_std_20)
-  target_include_directories(test_command_age_filter PRIVATE include)
-  target_link_libraries(test_command_age_filter
-    rclcpp::rclcpp ${rcl_interfaces_TARGETS} ${builtin_interfaces_TARGETS} ${geometry_msgs_TARGETS})
-
-  ament_add_gtest(test_motion_controller tests/motion_controller_tests.cpp)
-
-  target_include_directories(test_motion_controller PRIVATE include)
-  target_link_libraries(test_motion_controller
-    rpp_control
-  )
-
   ament_add_gtest(test_controller_lifecycle tests/controller_lifecycle_tests.cpp)
-  target_include_directories(test_controller_lifecycle PRIVATE include)
   target_link_libraries(test_controller_lifecycle rpp_control)
-
-  ament_add_gtest(
-    test_waterjet_allocator_safety
-    tests/waterjet_allocator_safety_tests.cpp)
-  target_include_directories(test_waterjet_allocator_safety PRIVATE include)
+  ament_add_gtest(test_waterjet_allocator_safety tests/waterjet_allocator_safety_tests.cpp)
   target_link_libraries(test_waterjet_allocator_safety rpp_control)
+  ament_add_gtest(test_reference_claims tests/reference_claims_tests.cpp)
+  target_link_libraries(test_reference_claims rpp_control)
+  ament_add_gtest(test_planar_path tests/planar_path_tests.cpp)
+  target_link_libraries(test_planar_path rpp_control)
+  ament_add_gtest(test_planar_path_reference tests/planar_path_reference_tests.cpp)
+  target_link_libraries(test_planar_path_reference rpp_control)
+  ament_add_gtest(test_pure_pursuit
+    tests/regulated_pure_pursuit_tests.cpp tests/pure_pursuit_controller_tests.cpp)
+  target_link_libraries(test_pure_pursuit rpp_control)
 
-  # copy test data to build directory
+  if(RPP_CONTROL_BUILD_ROS2)
+    ament_add_gtest(test_control_script_time tests/control_script_time_tests.cpp)
+    target_link_libraries(test_control_script_time rpp_control rclcpp::rclcpp
+      ${builtin_interfaces_TARGETS} ${rpp_ros_interfaces_TARGETS})
+  endif()
+
   add_custom_target(copy_test_directory ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/data"
       "${CMAKE_CURRENT_BINARY_DIR}/tests/data"
   )
-
-  add_dependencies(test_motion_controller copy_test_directory)
   add_dependencies(test_controller_lifecycle copy_test_directory)
   add_dependencies(test_waterjet_allocator_safety copy_test_directory)
+  add_dependencies(test_planar_path_reference copy_test_directory)
+  add_dependencies(test_pure_pursuit copy_test_directory)
 
-
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
